@@ -129,7 +129,10 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
     let active = true;
     const hostConnection = client.connect({
       onState: (value) => {
-        if (active) setConnection(value);
+        if (active) {
+          setConnection(value);
+          if (value.status === "connected") setError(undefined);
+        }
       },
       onSnapshot: () => {
         if (active) void load();

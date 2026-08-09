@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  client:
+  build-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -21,6 +21,98 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+      - run: npm run check:assets
       - run: npm audit --audit-level=high
       - run: npm run smoke:package
+
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:contract
+
+  browser-e2e:
+    needs: [build-unit, contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:functional
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-e2e-artifacts
+          path: |
+            playwright-report/
+            test-results/playwright/
+          if-no-files-found: error
+          retention-days: 7
+
+  accessibility:
+    needs: [build-unit, contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:a11y
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accessibility-artifacts
+          path: |
+            playwright-report/
+            test-results/playwright/
+          if-no-files-found: error
+          retention-days: 7
+
+  performance:
+    needs: [build-unit, contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:performance
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-artifacts
+          path: |
+            playwright-report/
+            test-results/playwright/
+          if-no-files-found: error
+          retention-days: 7

@@ -70,6 +70,7 @@ function ConnectionBanner({ state, onRetry }: { readonly state: ConnectionState;
   return (
     <div className={`connection-banner connection-${state.status}`} role={state.status === "unauthorized" ? "alert" : "status"}>
       <span className="connection-label">{item.icon}{item.label}</span>
+      {state.reason && <span className="connection-reason">{state.reason}</span>}
       {state.revision !== undefined && <span className="mono muted">rev {state.revision}</span>}
       {item.action && <button type="button" className="text-button" onClick={onRetry}>{item.action}</button>}
     </div>
