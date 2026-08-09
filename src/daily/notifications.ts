@@ -76,7 +76,7 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
       this.channel.onmessage = (event) => {
         const message = coordinationMessage(event.data);
         if (!message) return;
-        if (message.type === "delivered") this.delivered.add(message.key);
+        if (message.type === "delivered") this.rememberDelivered(message.key);
         else if (message.type === "bye") this.peers.delete(message.tabId);
         else if (message.tabId !== this.tabId) {
           this.peers.add(message.tabId);
@@ -89,8 +89,19 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
 
   private readonly settleMs: number;
 
+  private rememberDelivered(key: string): void {
+    this.delivered.add(key);
+    if (this.delivered.size <= 500) return;
+    for (const deliveredKey of this.delivered) {
+      this.delivered.delete(deliveredKey);
+      if (this.delivered.size <= 250) break;
+    }
+  }
+
   async runOnce(key: string, operation: () => void): Promise<void> {
     if (!this.channel) {
+      if (this.closed || this.delivered.has(key)) return;
+      this.rememberDelivered(key);
       operation();
       return;
     }
@@ -99,7 +110,7 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
     if (this.delivered.has(key)) return;
     const owner = [...this.peers, this.tabId].sort()[0];
     if (owner !== this.tabId) return;
-    this.delivered.add(key);
+    this.rememberDelivered(key);
     this.channel.postMessage({ type: "delivered", key } satisfies CoordinationMessage);
     operation();
   }

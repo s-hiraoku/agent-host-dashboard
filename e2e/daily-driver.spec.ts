@@ -135,7 +135,7 @@ test("provides session activity, diagnostics, scoped notifications, and search s
 test("delivers one private notification and revalidates its agent on click", async ({ page }) => {
   await page.addInitScript(() => {
     const shown: Array<{ title: string; options?: NotificationOptions; onclick?: () => void }> = [];
-    Object.defineProperty(window, "__dashboardNotifications", { value: shown });
+    Object.defineProperty(window, "__dashboardNotifications", { configurable: true, value: shown });
     class TestNotification {
       static permission: NotificationPermission = "default";
       static async requestPermission(): Promise<NotificationPermission> {

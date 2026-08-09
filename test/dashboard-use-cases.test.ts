@@ -5,6 +5,7 @@ import {
   providerMetrics,
   reconcileVisibleEvents,
   statusMetrics,
+  formatActivity,
 } from "../src/dashboard/use-cases.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 
@@ -83,6 +84,30 @@ describe("dashboard use cases", () => {
     expect(updated.facets).toBeUndefined();
     expect(updated.agents).toEqual(snapshot.agents);
     expect(updated.revision).toBe(41);
+  });
+
+  it("decrements total while invalidating facets for an off-page removal", () => {
+    const snapshot = {
+      ...createLargeDemoSnapshot(100),
+      agents: createLargeDemoSnapshot(100).agents.slice(0, 50),
+      facets: { byStatus: { working: 100 }, byProvider: { "demo-alpha": 100 } },
+    };
+
+    const updated = applyVisibleEvent(snapshot, {
+      type: "agent.removed",
+      revision: 41,
+      agentId: snapshot.agents[60]?.id ?? "demo:off-page",
+    });
+
+    expect(updated.total).toBe(99);
+    expect(updated.facets).toBeUndefined();
+  });
+
+  it("formats valid activity and handles invalid timestamps safely", () => {
+    const now = Date.parse("2026-01-15T10:00:00.000Z");
+    expect(formatActivity("2026-01-15T09:59:30.000Z", now)).toBe("30s ago");
+    expect(formatActivity("not-a-date", now)).toBe("No activity");
+    expect(formatActivity(undefined, now)).toBe("No activity");
   });
 
   it("prioritizes blocked and error agents without provider-specific rules", () => {

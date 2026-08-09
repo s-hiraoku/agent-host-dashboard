@@ -38,11 +38,18 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const notifications = useRef(notificationGateway ?? new BrowserNotificationGateway());
   const leaseRef = useRef<ClientLease | undefined>(undefined);
   const activeEndpoint = useRef<string | undefined>(undefined);
+  const preferenceSavePending = useRef(false);
   const attempt = useRef<{ readonly generation: number; readonly controller: AbortController; readonly vault?: MemoryCredentialVault }>({ generation: 0, controller: new AbortController() });
 
   useEffect(() => {
     leaseRef.current = lease;
   }, [lease]);
+
+  useEffect(() => {
+    if (!preferenceSavePending.current) return;
+    preferenceSavePending.current = false;
+    preferenceStore.save(preferences);
+  }, [preferenceStore, preferences]);
 
   useEffect(() => () => {
     attempt.current.controller.abort();
@@ -62,11 +69,8 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   }, [notificationCoordinator]);
 
   const updatePreferences = (update: DashboardPreferences | ((current: DashboardPreferences) => DashboardPreferences)) => {
-    setPreferences((current) => {
-      const next = typeof update === "function" ? update(current) : update;
-      preferenceStore.save(next);
-      return next;
-    });
+    preferenceSavePending.current = true;
+    setPreferences(update);
   };
 
   const resetConnection = () => {
@@ -182,6 +186,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
         onReconnect: resetConnection,
         onTerminalFailure: resetFailedConnection,
         onClearPreferences: () => {
+          preferenceSavePending.current = false;
           preferenceStore.clear();
           setPreferences(defaultPreferences);
         },

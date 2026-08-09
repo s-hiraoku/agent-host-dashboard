@@ -61,18 +61,12 @@ export class MockAgentHostTransport implements AgentHostTransport {
     const limit = request.limit ?? 50;
     const page = agents.slice(offset, offset + limit);
     const nextOffset = offset + page.length;
-    const byStatus = Object.fromEntries(
-      [...new Set(agents.map((agent) => agent.status))].map((status) => [
-        status,
-        agents.filter((agent) => agent.status === status).length,
-      ]),
-    );
-    const byProvider = Object.fromEntries(
-      [...new Set(agents.map((agent) => agent.provider))].map((provider) => [
-        provider,
-        agents.filter((agent) => agent.provider === provider).length,
-      ]),
-    );
+    const byStatus: Record<string, number> = {};
+    const byProvider: Record<string, number> = {};
+    for (const agent of agents) {
+      byStatus[agent.status] = (byStatus[agent.status] ?? 0) + 1;
+      byProvider[agent.provider] = (byProvider[agent.provider] ?? 0) + 1;
+    }
     return {
       agents: page,
       revision: snapshot.revision,
@@ -130,10 +124,10 @@ export class MockAgentHostTransport implements AgentHostTransport {
         if (options.signal?.aborted) throw options.signal.reason;
         if (event.revision > options.afterRevision) yield event;
       }
-      if (this.holdEventStreams) {
+      if (this.holdEventStreams && options.signal) {
         await new Promise<void>((resolve) => {
-          if (options.signal?.aborted) resolve();
-          else options.signal?.addEventListener("abort", () => resolve(), { once: true });
+          if (options.signal!.aborted) resolve();
+          else options.signal!.addEventListener("abort", () => resolve(), { once: true });
         });
       }
     } finally {

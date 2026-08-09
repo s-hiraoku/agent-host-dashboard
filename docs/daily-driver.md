@@ -10,10 +10,11 @@ and workspace state active so the operator can return without losing work.
 
 The development connector is a deterministic demo adapter for onboarding and
 recovery tests. A persistent simulation banner states that it never contacts the
-entered endpoint. It does not define agent-host paths or wire fields. Production
-builds fail closed; their connector remains blocked on the confirmed
-`AgentHostWireProtocol` requested in agent-host #2 and the authentication
-lifecycle requested in agent-host #4.
+entered endpoint. It does not define agent-host paths or wire fields. Agent-host
+issues #2 and #4 now define the v1 wire and bearer-authentication contracts.
+Production builds continue to fail closed until the v1 codec, official fixture
+conformance, and honest handling of unsupported global sort/facets land in a
+separate connector PR.
 
 ## Credential lifetime
 

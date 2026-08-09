@@ -17,9 +17,21 @@ describe("daily-driver notifications", () => {
     const notification = { kind: "error" as const, agentId: "session-id", agentName: "Agent", provider: "public-provider", project: "public-project" };
     const enabled = { ...defaultPreferences.notifications, enabled: true };
     expect(shouldNotify(notification, enabled, new Set(), new Set())).toBe(true);
+    expect(shouldNotify(notification, { ...enabled, enabled: false }, new Set(), new Set())).toBe(false);
     expect(shouldNotify(notification, enabled, new Set([notification.provider]), new Set())).toBe(false);
     expect(shouldNotify(notification, enabled, new Set(), new Set([notification.project]))).toBe(false);
     expect(shouldNotify(notification, { ...enabled, error: false }, new Set(), new Set())).toBe(false);
+  });
+
+  it("deduplicates delivery without cross-tab coordination", async () => {
+    const coordinator = new BrowserNotificationCoordinator({ tabId: "single-tab" });
+    let deliveries = 0;
+
+    await coordinator.runOnce("41:blocked", () => { deliveries += 1; });
+    await coordinator.runOnce("41:blocked", () => { deliveries += 1; });
+
+    expect(deliveries).toBe(1);
+    coordinator.close();
   });
 
   it("elects one tab without broadcasting agent data", async () => {

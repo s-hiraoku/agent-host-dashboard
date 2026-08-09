@@ -53,7 +53,7 @@ describe("daily-driver shell", () => {
 
     await user.clear(screen.getByLabelText("Agent-host endpoint"));
     await user.type(screen.getByLabelText("Agent-host endpoint"), "http://localhost:8787");
-    await user.type(screen.getByLabelText(/Access token/), generatedCredential);
+    await user.type(screen.getByLabelText(/Access token/), `  ${generatedCredential}  `);
     await user.click(screen.getByRole("button", { name: "Connect securely" }));
 
     expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();

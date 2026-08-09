@@ -276,7 +276,7 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
         })}><Ban />Interrupt</button>}
       </div>
 
-      {message && <p className="action-message" aria-live="polite">{message}</p>}
+      <p className="action-message" aria-live="polite">{message ?? ""}</p>
       <ConfirmDialog pending={pending} busy={busy} onCancel={() => setPending(undefined)} onConfirm={(confirmation) => execute(confirmation.target, confirmation.action)} />
     </aside>
   );
@@ -298,10 +298,11 @@ export interface DailyDriverControls {
   readonly environmentNotice?: string;
 }
 
-function SettingsSurface({ controls, onWorkspace, notificationPermission, onRequestNotifications, providers, projects, mutedProviders, mutedProjects, onToggleProvider, onToggleProject }: {
+function SettingsSurface({ controls, onWorkspace, notificationPermission, notificationError, onRequestNotifications, providers, projects, mutedProviders, mutedProjects, onToggleProvider, onToggleProject }: {
   readonly controls: DailyDriverControls;
   readonly onWorkspace: () => void;
   readonly notificationPermission: DashboardNotificationPermission;
+  readonly notificationError: string | undefined;
   readonly onRequestNotifications: () => void;
   readonly providers: readonly string[];
   readonly projects: readonly string[];
@@ -323,6 +324,7 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, onRequ
       <section className="settings-card" aria-labelledby="notification-heading">
         <div><p className="eyebrow">Attention notifications</p><h2 id="notification-heading">Blocked, completed, and error events</h2><p>Only new semantic events can notify. Initial snapshots and resyncs stay silent.</p></div>
         <div className="notification-permission"><Bell aria-hidden="true" /><span>Browser permission: <strong>{notificationPermission}</strong></span>{notificationPermission !== "granted" && notificationPermission !== "unsupported" && <button type="button" className="secondary-button" onClick={onRequestNotifications}>Enable desktop notifications</button>}</div>
+        <p className="action-message" aria-live="polite">{notificationError ?? ""}</p>
         <fieldset disabled={notificationPermission !== "granted"}><legend>Notification types</legend>
           <label><input type="checkbox" checked={controls.preferences.notifications.enabled} onChange={(event) => updateNotifications({ enabled: event.target.checked })} />Notifications enabled</label>
           <label><input type="checkbox" checked={controls.preferences.notifications.blocked} onChange={(event) => updateNotifications({ blocked: event.target.checked })} />Blocked agents</label>
@@ -368,12 +370,22 @@ interface RecentAgent {
   readonly status: AgentStatus;
 }
 
+function formatActionTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown time" : date.toLocaleString();
+}
+
+function mergeObserved(current: ReadonlySet<string>, values: readonly string[]): ReadonlySet<string> {
+  const additions = values.filter((value) => !current.has(value));
+  return additions.length === 0 ? current : new Set([...current, ...additions]);
+}
+
 function ActivitySurface({ recentAgents, actionHistory, onWorkspace, onSelect, onClear }: { readonly recentAgents: readonly RecentAgent[]; readonly actionHistory: readonly DashboardActionRecord[]; readonly onWorkspace: () => void; readonly onSelect: (agentId: string) => void; readonly onClear: () => void }) {
   return (
     <main id="main-content" tabIndex={-1} className="settings-workspace">
       <header className="settings-heading"><div><p className="eyebrow">Session memory</p><h1>Activity</h1></div><div className="surface-actions"><button className="secondary-button" type="button" onClick={onClear}>Clear session activity</button><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></div></header>
       <section className="settings-card" aria-labelledby="recent-heading"><div><p className="eyebrow">Recently inspected</p><h2 id="recent-heading">Recent agents</h2><p>Kept only for this browser session.</p></div><ol className="activity-list">{recentAgents.length ? recentAgents.map((agent) => <li key={agent.id}><button type="button" onClick={() => onSelect(agent.id)}><span><strong>{agent.name}</strong><small>{agent.provider}{agent.project ? ` · ${agent.project}` : ""}</small></span><StatusBadge status={agent.status} /></button></li>) : <li className="empty-state">No agents inspected yet.</li>}</ol></section>
-      <section className="settings-card" aria-labelledby="history-heading"><div><p className="eyebrow">Explicit operations</p><h2 id="history-heading">Action history</h2><p>Prompt text, commands, approval payloads, and error bodies are excluded.</p></div><ol className="activity-list action-history">{actionHistory.length ? actionHistory.map((entry) => <li key={entry.id}><div><span><strong>{entry.kind}</strong> · {entry.agentName}</span><small className="mono">{entry.occurredAt} · {entry.outcome}{entry.errorCode ? ` · ${entry.errorCode}` : ""}</small></div></li>) : <li className="empty-state">No actions performed in this session.</li>}</ol></section>
+      <section className="settings-card" aria-labelledby="history-heading"><div><p className="eyebrow">Explicit operations</p><h2 id="history-heading">Action history</h2><p>Prompt text, commands, approval payloads, and error bodies are excluded.</p></div><ol className="activity-list action-history">{actionHistory.length ? actionHistory.map((entry) => <li key={entry.id}><div><span><strong>{entry.kind}</strong> · {entry.agentName}</span><small className="mono"><time dateTime={entry.occurredAt}>{formatActionTime(entry.occurredAt)}</time> · {entry.outcome}{entry.errorCode ? ` · ${entry.errorCode}` : ""}</small></div></li>) : <li className="empty-state">No actions performed in this session.</li>}</ol></section>
     </main>
   );
 }
@@ -403,6 +415,8 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
   const [scenario, setScenario] = useState<DemoScenario>("live");
   const [surface, setSurface] = useState<"workspace" | "settings" | "activity" | "diagnostics" | "privacy">("workspace");
   const [notificationPermission, setNotificationPermission] = useState<DashboardNotificationPermission>(() => dailyDriver?.notificationGateway.permission() ?? "unsupported");
+  const [notificationError, setNotificationError] = useState<string>();
+  const [savedViewMessage, setSavedViewMessage] = useState<string>();
   const [mutedProviders, setMutedProviders] = useState<ReadonlySet<string>>(() => new Set());
   const [mutedProjects, setMutedProjects] = useState<ReadonlySet<string>>(() => new Set());
   const [recentAgents, setRecentAgents] = useState<readonly RecentAgent[]>([]);
@@ -438,8 +452,8 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       ...(model.snapshot?.agents ?? []),
       ...model.events.flatMap((event) => event.type === "agent.upserted" ? [event.agent] : []),
     ];
-    setObservedProviders((current) => new Set([...current, ...Object.keys(model.snapshot?.facets?.byProvider ?? {}), ...agents.map((agent) => agent.provider)]));
-    setObservedProjects((current) => new Set([...current, ...agents.flatMap((agent) => agent.project ? [agent.project] : [])]));
+    setObservedProviders((current) => mergeObserved(current, [...Object.keys(model.snapshot?.facets?.byProvider ?? {}), ...agents.map((agent) => agent.provider)]));
+    setObservedProjects((current) => mergeObserved(current, agents.flatMap((agent) => agent.project ? [agent.project] : [])));
   }, [model.events, model.snapshot?.agents, model.snapshot?.facets?.byProvider]);
 
   useEffect(() => {
@@ -468,9 +482,13 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
 
   const requestNotifications = () => {
     if (!dailyDriver) return;
+    setNotificationError(undefined);
     void dailyDriver.notificationGateway.requestPermission().then((permission) => {
       setNotificationPermission(permission);
       if (permission === "granted") dailyDriver.onPreferencesChange((current) => ({ ...current, notifications: { ...current.notifications, enabled: true } }));
+    }).catch(() => {
+      setNotificationPermission(dailyDriver.notificationGateway.permission());
+      setNotificationError("Notification permission could not be requested. Check browser or system settings, then try again.");
     });
   };
 
@@ -508,20 +526,23 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
 
   const saveCurrentView = () => {
     if (!dailyDriver) return;
-    dailyDriver.onPreferencesChange((current) => {
-      if (current.savedViews.length >= 12) return current;
-      const sequence = current.savedViews.length + 1;
-      return {
-        ...current,
-        savedViews: [...current.savedViews, {
-          id: `view-${Date.now()}-${sequence}`,
-          name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : model.query.status}`,
-          status: model.query.status,
-          provider: model.query.provider,
-          sort: model.query.sort,
-        }],
-      };
+    const current = dailyDriver.preferences;
+    if (current.savedViews.length >= 12) {
+      setSavedViewMessage("Saved view limit reached. Remove a view before saving another.");
+      return;
+    }
+    const sequence = current.savedViews.length + 1;
+    dailyDriver.onPreferencesChange({
+      ...current,
+      savedViews: [...current.savedViews, {
+        id: `view-${Date.now()}-${sequence}`,
+        name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : model.query.status}`,
+        status: model.query.status,
+        provider: model.query.provider,
+        sort: model.query.sort,
+      }],
     });
+    setSavedViewMessage(`Saved view ${sequence}.`);
   };
 
   return (
@@ -550,7 +571,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       </header>
       {dailyDriver?.environmentNotice && <div className="environment-notice" role="status"><ShieldAlert aria-hidden="true" />{dailyDriver.environmentNotice}</div>}
 
-      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={(provider) => toggleScope(setMutedProviders, provider)} onToggleProject={(project) => toggleScope(setMutedProjects, project)} />}
+      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} notificationError={notificationError} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={(provider) => toggleScope(setMutedProviders, provider)} onToggleProject={(project) => toggleScope(setMutedProjects, project)} />}
       {surface === "activity" && dailyDriver && <ActivitySurface recentAgents={recentAgents} actionHistory={model.actionHistory} onWorkspace={goWorkspace} onSelect={(agentId) => { model.select(agentId); goWorkspace(); }} onClear={() => { setRecentAgents([]); model.clearActionHistory(); }} />}
       {surface === "diagnostics" && dailyDriver && <DiagnosticsSurface model={model} onWorkspace={goWorkspace} />}
       {surface === "privacy" && dailyDriver && <PrivacySurface onWorkspace={goWorkspace} onClear={dailyDriver.onClearPreferences} />}
@@ -569,7 +590,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
         <section className="agent-rail panel" aria-labelledby="agents-heading">
           <div className="rail-heading"><div><p className="eyebrow">Attention queue</p><h1 id="agents-heading">Agents</h1></div><button type="button" className="icon-button" onClick={() => void model.refresh()} aria-label="Refresh agents"><RefreshCw /></button></div>
           <div className="filters">
-            {dailyDriver && <div className="saved-view-row"><label><span>Saved view</span><select defaultValue="" onChange={(event) => { const view = dailyDriver.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) model.setQuery({ text: "", status: view.status, provider: view.provider, sort: view.sort }); }}><option value="">Current filters</option>{dailyDriver.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><button type="button" onClick={saveCurrentView}>Save view</button></div>}
+            {dailyDriver && <><div className="saved-view-row"><label><span>Saved view</span><select defaultValue="" onChange={(event) => { const view = dailyDriver.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) model.setQuery({ text: "", status: view.status, provider: view.provider, sort: view.sort }); }}><option value="">Current filters</option>{dailyDriver.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><button type="button" onClick={saveCurrentView}>Save view</button></div><p className="action-message" aria-live="polite">{savedViewMessage ?? ""}</p></>}
             <label className="search-field"><span className="visually-hidden">Search agents</span><Search aria-hidden="true" /><input ref={searchRef} aria-keyshortcuts="/" value={model.query.text} onChange={(event) => model.setQuery(updateQuery(model.query, { text: event.target.value }))} placeholder="Search agents" /></label>
             <div className="filter-row">
               <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{metric.status}</option>)}</select></label>
@@ -600,9 +621,9 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
           </ul>
           {!model.snapshot?.agents.length && <div className="empty-state">No agents match the current filters.</div>}
           <nav className="pagination" aria-label="Agent pages">
-            <button type="button" onClick={model.previousPage} disabled={!model.hasPrevious}><ChevronLeft />Previous</button>
+            <button type="button" onClick={model.previousPage} disabled={model.loading || !model.hasPrevious}><ChevronLeft />Previous</button>
             <span>Page {model.page + 1}</span>
-            <button type="button" onClick={model.nextPage} disabled={!model.hasNext}>Next<ChevronRight /></button>
+            <button type="button" onClick={model.nextPage} disabled={model.loading || !model.hasNext}>Next<ChevronRight /></button>
           </nav>
         </section>
 

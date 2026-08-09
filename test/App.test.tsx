@@ -35,16 +35,28 @@ function renderDashboard(transport = new MockAgentHostTransport(), strict = fals
 
 class RecordingNotificationGateway implements NotificationGateway {
   currentPermission: DashboardNotificationPermission = "default";
+  requestFailure: Error | undefined;
   readonly shown: Array<{ title: string; options: NotificationOptions; onClick?: () => void }> = [];
   permission() { return this.currentPermission; }
-  async requestPermission() { this.currentPermission = "granted"; return this.currentPermission; }
+  async requestPermission() {
+    if (this.requestFailure) throw this.requestFailure;
+    this.currentPermission = "granted";
+    return this.currentPermission;
+  }
   show(title: string, options: NotificationOptions, onClick?: () => void) { this.shown.push({ title, options, ...(onClick ? { onClick } : {}) }); }
 }
 
-const immediateNotificationCoordinator: NotificationCoordinator = {
-  async runOnce(_key, operation) { operation(); },
-  close() {},
-};
+function createImmediateNotificationCoordinator(): NotificationCoordinator {
+  const delivered = new Set<string>();
+  return {
+    async runOnce(key, operation) {
+      if (delivered.has(key)) return;
+      delivered.add(key);
+      operation();
+    },
+    close() { delivered.clear(); },
+  };
+}
 
 function renderDailyDashboard(transport: MockAgentHostTransport, gateway = new RecordingNotificationGateway(), initialPreferences: DashboardPreferences = defaultPreferences) {
   transport.currentSnapshot = createLargeDemoSnapshot();
@@ -59,7 +71,7 @@ function renderDailyDashboard(transport: MockAgentHostTransport, gateway = new R
       onTerminalFailure() {},
       onClearPreferences() { setPreferences(defaultPreferences); },
       notificationGateway: gateway,
-      notificationCoordinator: immediateNotificationCoordinator,
+      notificationCoordinator: createImmediateNotificationCoordinator(),
       notificationNamespace: "test-host",
     };
     return <App client={client} dailyDriver={controls} showDemoControls={false} />;
@@ -74,6 +86,24 @@ describe("evaluation dashboard", () => {
     expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem").length).toBeLessThan(70);
     expect(screen.getByRole("button", { name: /Next/ })).toBeEnabled();
+  });
+
+  it("disables pagination while the next page is loading", async () => {
+    const transport = new MockAgentHostTransport();
+    const originalSnapshot = transport.snapshot.bind(transport);
+    let releaseNextPage: () => void = () => undefined;
+    const nextPageGate = new Promise<void>((resolve) => { releaseNextPage = resolve; });
+    transport.snapshot = async (request, options) => {
+      if (request.cursor === "50") await nextPageGate;
+      return await originalSnapshot(request, options);
+    };
+    const { user } = renderDashboard(transport);
+    const next = await screen.findByRole("button", { name: /Next/ });
+
+    await user.click(next);
+    expect(next).toBeDisabled();
+    releaseNextPage();
+    await waitFor(() => expect(next).toBeEnabled());
   });
 
   it("filters by semantic status and keeps public capability actions gated", async () => {
@@ -400,6 +430,19 @@ describe("evaluation dashboard", () => {
     expect(gateway.shown).toHaveLength(0);
   });
 
+  it("reports a notification permission request failure", async () => {
+    const gateway = new RecordingNotificationGateway();
+    gateway.requestFailure = new Error("browser rejected request");
+    const { user } = renderDailyDashboard(new MockAgentHostTransport(), gateway);
+    await screen.findByText("50 shown of 1000");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Enable desktop notifications" }));
+
+    expect(await screen.findByText(/Notification permission could not be requested/)).toBeInTheDocument();
+    expect(screen.getByText(/Browser permission:/)).toHaveTextContent("default");
+  });
+
   it("does not infer a transition for an existing attention agent outside the loaded page", async () => {
     let releaseEvents: () => void = () => undefined;
     const transport = new MockAgentHostTransport();
@@ -505,5 +548,24 @@ describe("evaluation dashboard", () => {
 
     expect(within(screen.getByRole("group", { name: "Providers" })).getByLabelText("demo-alpha")).not.toBeChecked();
     expect(screen.getByRole("group", { name: "Projects" })).toBeInTheDocument();
+  });
+
+  it("announces when the saved-view limit is reached", async () => {
+    const savedViews = Array.from({ length: 12 }, (_, index) => ({
+      id: `view-${index}`,
+      name: `View ${index}`,
+      status: "all" as const,
+      provider: "",
+      sort: { field: "status" as const, direction: "asc" as const },
+    }));
+    const { user } = renderDailyDashboard(new MockAgentHostTransport(), new RecordingNotificationGateway(), {
+      ...defaultPreferences,
+      savedViews,
+    });
+    await screen.findByText("50 shown of 1000");
+
+    await user.click(screen.getByRole("button", { name: "Save view" }));
+
+    expect(await screen.findByText(/Saved view limit reached/)).toBeInTheDocument();
   });
 });

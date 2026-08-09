@@ -43,9 +43,13 @@ function updateVisibleFacets(
   return { byStatus, byProvider };
 }
 
-function invalidateFacets(snapshot: AgentSnapshot, revision: number): AgentSnapshot {
+function invalidateFacets(snapshot: AgentSnapshot, revision: number, totalDelta = 0): AgentSnapshot {
   const { facets: _facets, ...withoutFacets } = snapshot;
-  return { ...withoutFacets, revision };
+  return {
+    ...withoutFacets,
+    revision,
+    ...(snapshot.total === undefined ? {} : { total: Math.max(0, snapshot.total + totalDelta) }),
+  };
 }
 
 export function applyVisibleEvent(
@@ -76,7 +80,7 @@ export function applyVisibleEvent(
   }
   if (event.type === "agent.removed") {
     const previous = snapshot.agents.find((agent) => agent.id === event.agentId);
-    if (!previous) return invalidateFacets(snapshot, event.revision);
+    if (!previous) return invalidateFacets(snapshot, event.revision, -1);
     const facets = updateVisibleFacets(snapshot, previous, undefined);
     return {
       ...snapshot,
@@ -110,7 +114,9 @@ export function findAttentionAgent(agents: readonly AgentSummary[]): AgentSummar
 
 export function formatActivity(value: string | undefined, now = Date.now()): string {
   if (!value) return "No activity";
-  const delta = Math.max(0, now - Date.parse(value));
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return "No activity";
+  const delta = Math.max(0, now - parsed);
   if (delta < 60_000) return `${Math.max(1, Math.floor(delta / 1_000))}s ago`;
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;

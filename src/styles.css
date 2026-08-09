@@ -218,7 +218,7 @@ h3 { margin-bottom: 0; font-size: 0.92rem; }
 
 .agent-header { min-height: 5.2rem; padding: 1rem 1.1rem; border-bottom: 1px solid var(--line); }
 .agent-header h2 { font-size: 1.3rem; }
-.agent-header > .status-badge { padding: 0.45rem 0.6rem; border: 1px solid currentColor; }
+.agent-header > .status-badge { padding: 0.45rem 0.6rem; border: 1px solid currentcolor; }
 .agent-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0.8rem; border: 1px solid var(--line); }
 .agent-facts div { min-width: 0; padding: 0.7rem 0.8rem; border-inline-end: 1px solid var(--line); }
 .agent-facts div:last-child { border-inline-end: 0; }

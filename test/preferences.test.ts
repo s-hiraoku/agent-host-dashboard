@@ -76,4 +76,23 @@ describe("daily-driver preferences", () => {
     storage.values.set(preferenceStorageKey, "{not-json");
     expect(store.load()).toBe(defaultPreferences);
   });
+
+  it("bounds and sanitizes saved views", () => {
+    const savedViews = Array.from({ length: 14 }, (_, index) => ({
+      id: `view-${index}`,
+      name: index === 1 ? " ".repeat(41) : `View ${index}`,
+      status: index === 2 ? "private-status" : "blocked",
+      provider: "p".repeat(index === 3 ? 101 : 3),
+      sort: { field: "status", direction: "asc" },
+    }));
+    savedViews[4] = { ...savedViews[4]!, id: "view-0" };
+
+    const sanitized = sanitizePreferences({ ...defaultPreferences, savedViews });
+
+    expect(sanitized.savedViews.length).toBeLessThanOrEqual(12);
+    expect(new Set(sanitized.savedViews.map((view) => view.id)).size).toBe(sanitized.savedViews.length);
+    expect(sanitized.savedViews.every((view) => view.name.length <= 40)).toBe(true);
+    expect(sanitized.savedViews.find((view) => view.id === "view-2")?.status).toBe("all");
+    expect(sanitized.savedViews.find((view) => view.id === "view-3")?.provider).toBe("");
+  });
 });

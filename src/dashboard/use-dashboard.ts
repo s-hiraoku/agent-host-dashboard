@@ -310,21 +310,21 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   );
 
   const nextPage = useCallback(() => {
-    if (!snapshot?.nextCursor) return;
+    if (loading || !snapshot?.nextCursor) return;
     const nextPage = page + 1;
     cursorRef.current = snapshot.nextCursor;
     setCursors((current) => [...current.slice(0, nextPage), snapshot.nextCursor]);
     setPage(nextPage);
     void load();
-  }, [load, page, snapshot?.nextCursor]);
+  }, [load, loading, page, snapshot?.nextCursor]);
 
   const previousPage = useCallback(() => {
-    if (page === 0) return;
+    if (loading || page === 0) return;
     const nextPage = page - 1;
     cursorRef.current = cursors[nextPage];
     setPage(nextPage);
     void load();
-  }, [cursors, load, page]);
+  }, [cursors, load, loading, page]);
 
   const perform = useCallback(
     async (target: AgentDetail, action: AgentAction) => {

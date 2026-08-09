@@ -31,7 +31,7 @@ export class MemoryCredentialVault {
   #credential: string | undefined;
 
   replace(credential: string | undefined): void {
-    this.#credential = credential?.trim() ? credential : undefined;
+    this.#credential = credential?.trim() || undefined;
   }
 
   read = (): string | undefined => this.#credential;

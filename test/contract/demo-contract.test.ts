@@ -62,4 +62,19 @@ describe("fixture-backed public contract", () => {
     expect(serialized).not.toMatch(/authorization|bearer|access[_-]?token|refresh[_-]?token|privateSession/i);
     expect(serialized).not.toMatch(/\/Users\/|\/home\//);
   });
+
+  it("rejects unknown status facet keys", () => {
+    const ajv = new Ajv({ allErrors: true, strict: true });
+    addFormats(ajv);
+    const validate = ajv.compile(schema);
+    const fixture = {
+      apiInfo: new MockAgentHostTransport().apiInfo,
+      snapshot: { ...createDemoSnapshot(), facets: { byStatus: { privateStatus: 1 }, byProvider: {} } },
+      details: demoAgents,
+      health: demoAdapterHealth,
+      events,
+    };
+
+    expect(validate(fixture)).toBe(false);
+  });
 });

@@ -1,4 +1,5 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agent-host-dashboard.local/contracts/demo-fixture.schema.json",
   "type": "object",
   "additionalProperties": false,
@@ -103,7 +104,11 @@
           "additionalProperties": false,
           "required": ["byStatus", "byProvider"],
           "properties": {
-            "byStatus": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "byStatus": {
+              "type": "object",
+              "propertyNames": { "enum": ["unknown", "idle", "working", "blocked", "done", "error"] },
+              "additionalProperties": { "type": "integer", "minimum": 0 }
+            },
             "byProvider": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
           }
         }
