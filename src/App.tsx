@@ -294,6 +294,7 @@ export interface DailyDriverControls {
   readonly onClearPreferences: () => void;
   readonly notificationGateway: NotificationGateway;
   readonly notificationCoordinator: NotificationCoordinator;
+  readonly notificationNamespace: string;
   readonly environmentNotice?: string;
 }
 
@@ -450,7 +451,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       const notification = notificationFromEvent(event);
       if (!dailyDriver || notificationPermission !== "granted" || !notification || !shouldNotify(notification, dailyDriver.preferences.notifications, mutedProviders, mutedProjects)) continue;
       const label = notification.kind === "completed" ? "completed" : `is ${notification.kind}`;
-      const publicCoordinationKey = `${event.revision}:${notification.kind}`;
+      const publicCoordinationKey = `${dailyDriver.notificationNamespace}:${event.revision}:${notification.kind}`;
       void dailyDriver.notificationCoordinator.runOnce(publicCoordinationKey, () => dailyDriver.notificationGateway.show(`${notification.agentName} ${label}`, {
         body: [notification.provider, notification.project].filter(Boolean).join(" · "),
         tag: publicCoordinationKey,

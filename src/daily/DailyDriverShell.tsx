@@ -19,6 +19,11 @@ const failureCopy: Record<SessionFailure, { readonly icon: ReactNode; readonly t
   error: { icon: <ShieldAlert aria-hidden="true" />, title: "Connection could not be opened", guidance: "Review the endpoint and retry. No credential was retained." },
 };
 
+async function notificationNamespaceFor(endpoint: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint));
+  return [...new Uint8Array(digest).slice(0, 12)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator }) {
   const [preferences, setPreferences] = useState(() => preferenceStore.load());
   const [lease, setLease] = useState<ClientLease>();
@@ -26,6 +31,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const [connecting, setConnecting] = useState(false);
   const [failure, setFailure] = useState<{ readonly kind: SessionFailure; readonly message: string }>();
   const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
+  const [notificationNamespace, setNotificationNamespace] = useState<string>();
   const [activeNotificationCoordinator, setActiveNotificationCoordinator] = useState<NotificationCoordinator | undefined>(() => notificationCoordinator);
   const formRef = useRef<HTMLFormElement>(null);
   const activeCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
@@ -79,6 +85,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     activeCredentialVault.current?.clear();
     activeCredentialVault.current = undefined;
     activeEndpoint.current = undefined;
+    setNotificationNamespace(undefined);
     setLease(undefined);
     setShowOnboarding(true);
     setConnecting(false);
@@ -136,6 +143,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     try {
       openedLease = await connector.open({ baseUrl, credential: attemptVault.read }, controller.signal);
       await openedLease.client.discover({ signal: controller.signal });
+      const nextNotificationNamespace = await notificationNamespaceFor(baseUrl);
       if (attempt.current.generation !== generation || controller.signal.aborted) {
         attemptVault.clear();
         openedLease.close();
@@ -151,6 +159,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
         setWorkspaceGeneration((current) => current + 1);
       }
       activeEndpoint.current = baseUrl;
+      setNotificationNamespace(nextNotificationNamespace);
       updatePreferences((current) => ({ ...current, endpoint: baseUrl }));
       setLease(openedLease);
       setShowOnboarding(false);
@@ -167,7 +176,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && activeNotificationCoordinator && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
+      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,
@@ -179,6 +188,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
         ...(environmentNotice ? { environmentNotice } : {}),
         notificationGateway: notifications.current,
         notificationCoordinator: activeNotificationCoordinator,
+        notificationNamespace,
       }} /></div>}
       {showOnboarding && <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">

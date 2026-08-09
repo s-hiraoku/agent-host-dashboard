@@ -162,7 +162,9 @@ test("delivers one private notification and revalidates its agent on click", asy
     const notification = (window as typeof window & { __dashboardNotifications: Array<{ title: string; options?: NotificationOptions }> }).__dashboardNotifications[0]!;
     return { title: notification.title, body: notification.options?.body, tag: notification.options?.tag };
   });
-  expect(delivered).toEqual({ title: "Sanitized agent 0001 is blocked", body: "demo-alpha · project-0", tag: "41:blocked" });
+  expect(delivered).toMatchObject({ title: "Sanitized agent 0001 is blocked", body: "demo-alpha · project-0" });
+  expect(delivered.tag).toMatch(/^[0-9a-f]{24}:41:blocked$/);
+  expect(delivered.tag).not.toContain("127.0.0.1");
   expect(JSON.stringify(delivered)).not.toMatch(/demo:agent|\/workspace|prompt|command|approval/i);
 
   await page.evaluate(() => {

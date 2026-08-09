@@ -59,6 +59,7 @@ function renderDailyDashboard(transport: MockAgentHostTransport, gateway = new R
       onClearPreferences() { setPreferences(defaultPreferences); },
       notificationGateway: gateway,
       notificationCoordinator: immediateNotificationCoordinator,
+      notificationNamespace: "test-host",
     };
     return <App client={client} dailyDriver={controls} showDemoControls={false} />;
   }
@@ -261,16 +262,17 @@ describe("evaluation dashboard", () => {
 
   it("resets the notification baseline during a revision-gap resync", async () => {
     const transport = new MockAgentHostTransport();
+    const transitioned = { ...createLargeDemoSnapshot().agents[0]!, status: "blocked" as const };
     let streamAttempt = 0;
     transport.events = async function* resyncEvents(options) {
       streamAttempt += 1;
       if (streamAttempt === 1) {
         const snapshot = createLargeDemoSnapshot(1_000, 42);
-        transport.currentSnapshot = { ...snapshot, agents: snapshot.agents.map((agent, index) => index === 0 ? { ...agent, status: "blocked" } : agent) };
+        transport.currentSnapshot = { ...snapshot, agents: snapshot.agents.slice(1), total: snapshot.total! - 1 };
         yield { type: "heartbeat", revision: 42 } as const;
         return;
       }
-      yield { type: "agent.upserted", revision: 43, agent: transport.currentSnapshot.agents[0]! } as const;
+      yield { type: "agent.upserted", revision: 43, agent: transitioned } as const;
       await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
     };
     const gateway = new RecordingNotificationGateway();

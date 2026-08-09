@@ -166,7 +166,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       },
       onSnapshot: (authoritativeSnapshot) => {
         if (active) {
-          for (const agent of authoritativeSnapshot.agents) knownStatuses.current.set(agent.id, agent.status);
+          knownStatuses.current = new Map(authoritativeSnapshot.agents.map((agent) => [agent.id, agent.status]));
           snapshotReady.current = true;
           void load();
         }
