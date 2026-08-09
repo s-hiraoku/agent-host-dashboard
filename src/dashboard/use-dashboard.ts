@@ -85,7 +85,8 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
   const [cursors, setCursors] = useState<readonly (string | undefined)[]>([undefined]);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
+  const [connectionError, setConnectionError] = useState<string>();
+  const [operationError, setOperationError] = useState<string>();
   const [actionResult, setActionResult] = useState<AgentActionResult>();
   const queryRef = useRef(query);
   const cursorRef = useRef<string | undefined>(undefined);
@@ -113,11 +114,11 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
       );
       setSnapshot(reconciledSnapshot);
       setHealth(nextHealth);
-      setError(undefined);
+      setOperationError(undefined);
       setSelectedId((current) => current ?? nextSnapshot.agents[0]?.id);
     } catch (failure) {
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      setError(toAgentHostError(failure).message);
+      setOperationError(toAgentHostError(failure).message);
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
@@ -131,7 +132,7 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
       onState: (value) => {
         if (active) {
           setConnection(value);
-          if (value.status === "connected") setError(undefined);
+          if (value.status === "connected") setConnectionError(undefined);
         }
       },
       onSnapshot: () => {
@@ -149,7 +150,7 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
         }
       },
       onError: (failure) => {
-        if (active) setError(failure.message);
+        if (active) setConnectionError(failure.message);
       },
     });
     return () => {
@@ -166,9 +167,12 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
     const controller = new AbortController();
     void client
       .detail(selectedId, { signal: controller.signal })
-      .then(setDetail)
+      .then((value) => {
+        setDetail(value);
+        setOperationError(undefined);
+      })
       .catch((failure: unknown) => {
-        if (!controller.signal.aborted) setError(toAgentHostError(failure).message);
+        if (!controller.signal.aborted) setOperationError(toAgentHostError(failure).message);
       });
     return () => controller.abort();
   }, [client, selectedId, snapshot?.revision]);
@@ -224,7 +228,7 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
       hasPrevious: page > 0,
       hasNext: Boolean(snapshot?.nextCursor),
       loading,
-      error,
+      error: operationError ?? connectionError,
       actionResult,
       setQuery,
       select: setSelectedId,
@@ -237,12 +241,13 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
       actionResult,
       connection,
       detail,
-      error,
+      connectionError,
       events,
       health,
       load,
       loading,
       nextPage,
+      operationError,
       page,
       perform,
       previousPage,

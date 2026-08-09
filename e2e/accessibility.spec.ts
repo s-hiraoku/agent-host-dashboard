@@ -25,7 +25,7 @@ test("uses non-color status text and honors reduced motion", async ({ page }) =>
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/?fixture=unauthorized");
   await expect(page.getByText("Authentication required")).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("credential was rejected");
+  await expect(page.locator(".connection-banner")).toContainText("credential was rejected");
   const animationDuration = await page.locator(".connection-banner svg").evaluate(
     (element) => getComputedStyle(element).animationDuration,
   );

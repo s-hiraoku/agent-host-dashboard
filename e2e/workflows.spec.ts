@@ -137,11 +137,11 @@ test("recovers from an SSE reconnect and a revision-gap resync", async ({ page }
 test("renders authorization, incompatibility, adapter, and error recovery states", async ({ page }) => {
   await page.goto("/?fixture=unauthorized");
   await expect(page.getByText("Authentication required")).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("credential was rejected");
+  await expect(page.locator(".connection-banner")).toContainText("credential was rejected");
 
   await page.goto("/?fixture=incompatible");
   await expect(page.getByText("Incompatible API version")).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Unsupported agent-host API version");
+  await expect(page.locator(".connection-banner")).toContainText("Unsupported agent-host API version");
 
   await page.goto("/");
   await expect(page.getByRole("region", { name: "Adapter health" })).toContainText("degraded");

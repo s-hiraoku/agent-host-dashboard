@@ -282,6 +282,7 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
   const model = useDashboard(client);
   const [scenario, setScenario] = useState<DemoScenario>("live");
   const displayConnection = scenarioStates[scenario] ?? model.connection;
+  const displayError = model.error === displayConnection.reason ? undefined : model.error;
   const metrics = statusMetrics(model.snapshot);
   const providers = providerMetrics(model.snapshot);
   const currentTime = now();
@@ -405,7 +406,7 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
 
         <ActionPanel detail={model.detail} perform={model.perform} />
       </main>
-      {model.error && <div className="global-error" role="alert"><AlertTriangle />{model.error}<button type="button" onClick={() => void model.refresh()}>Retry</button></div>}
+      {displayError && <div className="global-error" role="alert"><AlertTriangle />{displayError}<button type="button" onClick={() => void model.refresh()}>Retry</button></div>}
     </div>
   );
 }
