@@ -2,12 +2,14 @@
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { App } from "../src/App.js";
+import { App, type DailyDriverControls } from "../src/App.js";
 import { DefaultAgentHostClient } from "../src/client.js";
 import { AgentHostError } from "../src/errors.js";
+import type { DashboardNotificationPermission, NotificationCoordinator, NotificationGateway } from "../src/daily/notifications.js";
+import { defaultPreferences, type DashboardPreferences } from "../src/daily/preferences.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 
@@ -28,6 +30,39 @@ function renderDashboard(transport = new MockAgentHostTransport(), strict = fals
   const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
   const app = <App client={client} />;
   return { transport, user: userEvent.setup(), ...render(strict ? <StrictMode>{app}</StrictMode> : app) };
+}
+
+class RecordingNotificationGateway implements NotificationGateway {
+  currentPermission: DashboardNotificationPermission = "default";
+  readonly shown: Array<{ title: string; options: NotificationOptions; onClick?: () => void }> = [];
+  permission() { return this.currentPermission; }
+  async requestPermission() { this.currentPermission = "granted"; return this.currentPermission; }
+  show(title: string, options: NotificationOptions, onClick?: () => void) { this.shown.push({ title, options, ...(onClick ? { onClick } : {}) }); }
+}
+
+const immediateNotificationCoordinator: NotificationCoordinator = {
+  async runOnce(_key, operation) { operation(); },
+  close() {},
+};
+
+function renderDailyDashboard(transport: MockAgentHostTransport, gateway = new RecordingNotificationGateway(), initialPreferences: DashboardPreferences = defaultPreferences) {
+  transport.currentSnapshot = createLargeDemoSnapshot();
+  transport.holdEventStreams = true;
+  const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+  function Harness() {
+    const [preferences, setPreferences] = useState<DashboardPreferences>(initialPreferences);
+    const controls: DailyDriverControls = {
+      preferences,
+      onPreferencesChange(update) { setPreferences((current) => typeof update === "function" ? update(current) : update); },
+      onReconnect() {},
+      onTerminalFailure() {},
+      onClearPreferences() { setPreferences(defaultPreferences); },
+      notificationGateway: gateway,
+      notificationCoordinator: immediateNotificationCoordinator,
+    };
+    return <App client={client} dailyDriver={controls} showDemoControls={false} />;
+  }
+  return { gateway, transport, user: userEvent.setup(), ...render(<Harness />) };
 }
 
 describe("evaluation dashboard", () => {
@@ -161,5 +196,135 @@ describe("evaluation dashboard", () => {
     await waitFor(() => expect(screen.getByText("Live connection")).toBeInTheDocument(), { timeout: 2_000 });
     await waitFor(() => expect(screen.getByText("r41")).toBeInTheDocument(), { timeout: 2_000 });
     expect(screen.getByLabelText("Prompt")).toHaveValue("Keep this reconnect draft");
+  });
+
+  it("requests notification permission from an explicit gesture and ignores the initial snapshot", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const blocked = { ...createLargeDemoSnapshot().agents[0]!, status: "blocked" as const };
+    const alreadyBlocked = createLargeDemoSnapshot().agents[1]!;
+    transport.eventStreams = [[
+      { type: "agent.upserted", revision: 41, agent: alreadyBlocked },
+      { type: "agent.upserted", revision: 42, agent: blocked },
+    ]];
+    const { gateway, user } = renderDailyDashboard(transport);
+    await screen.findByText("50 shown of 1000");
+    expect(gateway.shown).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Enable desktop notifications" }));
+    await waitFor(() => expect(screen.getByText(/Browser permission:/)).toHaveTextContent("granted"));
+
+    releaseEvents();
+    await waitFor(() => expect(gateway.shown).toHaveLength(1));
+    expect(gateway.shown[0]?.title).toContain("is blocked");
+    gateway.shown[0]?.onClick?.();
+    await waitFor(() => expect(document.querySelector(".workspace")).toHaveFocus());
+  });
+
+  it("does not infer a transition for an existing attention agent outside the loaded page", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const pageOutsideBlocked = createLargeDemoSnapshot().agents[55]!;
+    transport.eventStreams = [[{ type: "agent.upserted", revision: 41, agent: pageOutsideBlocked }]];
+    const gateway = new RecordingNotificationGateway();
+    gateway.currentPermission = "granted";
+    renderDailyDashboard(transport, gateway, { ...defaultPreferences, notifications: { ...defaultPreferences.notifications, enabled: true } });
+    await screen.findByText("50 shown of 1000");
+    releaseEvents();
+    await screen.findByText("r41");
+    expect(gateway.shown).toHaveLength(0);
+  });
+
+  it("uses the authoritative snapshot baseline while the visible snapshot request is slow", async () => {
+    const transport = new MockAgentHostTransport();
+    const originalSnapshot = transport.snapshot.bind(transport);
+    let snapshotCalls = 0;
+    let releaseVisibleSnapshot: () => void = () => undefined;
+    const visibleSnapshotGate = new Promise<void>((resolve) => { releaseVisibleSnapshot = resolve; });
+    transport.snapshot = async (request, options) => {
+      snapshotCalls += 1;
+      if (snapshotCalls === 2) await visibleSnapshotGate;
+      return await originalSnapshot(request, options);
+    };
+    const transitioned = { ...createLargeDemoSnapshot().agents[0]!, status: "blocked" as const };
+    transport.eventStreams = [[{ type: "agent.upserted", revision: 41, agent: transitioned }]];
+    const gateway = new RecordingNotificationGateway();
+    gateway.currentPermission = "granted";
+    renderDailyDashboard(transport, gateway, { ...defaultPreferences, notifications: { ...defaultPreferences.notifications, enabled: true } });
+
+    await waitFor(() => expect(gateway.shown).toHaveLength(1));
+    releaseVisibleSnapshot();
+    await screen.findByText("50 shown of 1000");
+  });
+
+  it("resets the notification baseline during a revision-gap resync", async () => {
+    const transport = new MockAgentHostTransport();
+    let streamAttempt = 0;
+    transport.events = async function* resyncEvents(options) {
+      streamAttempt += 1;
+      if (streamAttempt === 1) {
+        const snapshot = createLargeDemoSnapshot(1_000, 42);
+        transport.currentSnapshot = { ...snapshot, agents: snapshot.agents.map((agent, index) => index === 0 ? { ...agent, status: "blocked" } : agent) };
+        yield { type: "heartbeat", revision: 42 } as const;
+        return;
+      }
+      yield { type: "agent.upserted", revision: 43, agent: transport.currentSnapshot.agents[0]! } as const;
+      await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    };
+    const gateway = new RecordingNotificationGateway();
+    gateway.currentPermission = "granted";
+    renderDailyDashboard(transport, gateway, { ...defaultPreferences, notifications: { ...defaultPreferences.notifications, enabled: true } });
+
+    await screen.findByText("r43", {}, { timeout: 2_000 });
+    expect(gateway.shown).toHaveLength(0);
+  });
+
+  it("keeps recent agents and sanitized action history in the current session", async () => {
+    const { user } = renderDailyDashboard(new MockAgentHostTransport());
+    await user.selectOptions(await screen.findByLabelText("Status"), "blocked");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent/ }))[0]!);
+    await user.click(await screen.findByRole("button", { name: /Read output/ }));
+    await waitFor(() => expect(screen.getByText(/read completed/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+
+    expect(screen.getByRole("heading", { name: "Recent agents" })).toBeInTheDocument();
+    const history = screen.getByRole("heading", { name: "Action history" }).closest("section");
+    expect(history).not.toBeNull();
+    expect(within(history!).getByText("read")).toBeInTheDocument();
+    expect(within(history!).getByText(/Sanitized agent/)).toBeInTheDocument();
+    expect(screen.getByText(/Prompt text, commands, approval payloads/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear session activity" }));
+    expect(screen.getByText("No agents inspected yet.")).toBeInTheDocument();
+    expect(screen.getByText("No actions performed in this session.")).toBeInTheDocument();
+  });
+
+  it("opens sanitized diagnostics and focuses search with the slash shortcut", async () => {
+    const { user } = renderDailyDashboard(new MockAgentHostTransport());
+    await screen.findByText("50 shown of 1000");
+    await user.keyboard("/");
+    expect(screen.getByLabelText("Search agents")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Diagnostics" }));
+    expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
+    expect(screen.getByText("Sanitized diagnostics only")).toBeInTheDocument();
+    expect(screen.getByText("events-after-revision")).toBeInTheDocument();
+  });
+
+  it("keeps observed notification scopes and mute choices stable across filtering", async () => {
+    const { user } = renderDailyDashboard(new MockAgentHostTransport());
+    await screen.findByText("50 shown of 1000");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByText(/Provider and project controls/));
+    const providers = screen.getByRole("group", { name: "Providers" });
+    await user.click(within(providers).getByLabelText("demo-alpha"));
+    await user.click(screen.getAllByRole("button", { name: "Workspace" })[0]!);
+    await user.selectOptions(screen.getByLabelText("Provider"), "demo-beta");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByText(/Provider and project controls/));
+
+    expect(within(screen.getByRole("group", { name: "Providers" })).getByLabelText("demo-alpha")).not.toBeChecked();
+    expect(screen.getByRole("group", { name: "Projects" })).toBeInTheDocument();
   });
 });

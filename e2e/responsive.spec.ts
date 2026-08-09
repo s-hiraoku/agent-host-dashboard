@@ -28,3 +28,14 @@ test("keeps first-run onboarding usable at a narrow viewport", async ({ page }) 
   expect(layout.scrollWidth).toBe(layout.clientWidth);
   expect(layout.buttonHeight).toBeGreaterThanOrEqual(37);
 });
+
+test("keeps activity, diagnostics, settings, and privacy usable without horizontal overflow", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connect securely" }).click();
+  for (const surface of ["Activity", "Diagnostics", "Settings", "Privacy"]) {
+    await page.getByRole("button", { name: surface }).click();
+    await expect(page.locator("#main-content")).toBeVisible();
+    const widths = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+    expect(widths.scroll).toBe(widths.client);
+  }
+});

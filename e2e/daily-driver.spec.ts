@@ -77,3 +77,57 @@ test("supports keyboard-only first-run connection", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.getByText("50 shown of 1000")).toBeVisible();
 });
+
+test("provides session activity, diagnostics, scoped notifications, and search shortcut", async ({ page, context }) => {
+  await context.grantPermissions(["notifications"]);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.getByText("50 shown of 1000")).toBeVisible();
+  await page.keyboard.press("/");
+  await expect(page.getByLabel("Search agents")).toBeFocused();
+  await page.getByLabel("Status").selectOption("blocked");
+  await page.locator(".agent-row").first().click();
+  await page.getByRole("button", { name: "Read output" }).click();
+  await expect(page.getByText(/read completed/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Activity" }).click();
+  await expect(page.getByRole("heading", { name: "Recent agents" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Action history" })).toBeVisible();
+  await expect(page.locator(".action-history")).toContainText("read");
+  await page.locator(".activity-list button").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".workspace")).toBeFocused();
+  await page.getByRole("button", { name: "Activity" }).click();
+  await page.locator(".settings-heading").getByRole("button", { name: "Workspace" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".workspace")).toBeFocused();
+
+  await page.getByRole("button", { name: "Diagnostics" }).click();
+  await expect(page.getByText("events-after-revision")).toBeVisible();
+  await expect(page.getByText("Sanitized diagnostics only")).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const permission = page.getByText(/Browser permission:/);
+  await expect(permission).toContainText(/granted|denied/);
+  if ((await permission.textContent())?.includes("granted")) await page.getByLabel("Notifications enabled").check();
+  await page.getByText(/Provider and project controls/).click();
+  const providers = page.getByRole("group", { name: "Providers" });
+  const projects = page.getByRole("group", { name: "Projects" });
+  await expect(providers).toBeVisible();
+  await expect(projects).toBeVisible();
+  await providers.getByLabel("demo-alpha").uncheck();
+  await projects.locator('input[type="checkbox"]').first().uncheck();
+  await page.getByRole("combobox", { name: "Density", exact: true }).selectOption("compact");
+
+  const persisted = await page.evaluate(() => localStorage.getItem("agent-host-dashboard.preferences") ?? "");
+  expect(persisted).not.toMatch(/Sanitized agent|demo:agent|recent|actionHistory|muted|project-0|read/);
+
+  await page.reload();
+  await connect(page);
+  await page.getByRole("button", { name: "Activity" }).click();
+  await expect(page.getByText("No agents inspected yet.")).toBeVisible();
+  await expect(page.getByText("No actions performed in this session.")).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByText(/Provider and project controls/).click();
+  await expect(page.getByRole("group", { name: "Providers" }).locator('input[type="checkbox"]').first()).toBeChecked();
+});

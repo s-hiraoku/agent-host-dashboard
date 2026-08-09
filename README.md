@@ -114,6 +114,8 @@ screenshot and trace, and CI uploads those artifacts with the HTML report.
 The default app entry opens first-run connection onboarding. Credentials live
 only in memory and are cleared on failure, connection change, or reload. The
 dashboard persists only a strict, versioned projection of non-secret appearance
-and semantic filter preferences. See
+and semantic filter preferences plus global notification-type toggles. Recent
+agents, sanitized action history, and provider/project notification scopes stay
+session-only. See
 [docs/daily-driver.md](docs/daily-driver.md) for the connector lease, privacy
 boundary, migration behavior, and current backend dependencies.

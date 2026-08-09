@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import { BrowserNotificationCoordinator, notificationFromEvent, shouldNotify } from "../src/daily/notifications.js";
+import { defaultPreferences } from "../src/daily/preferences.js";
+import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
+
+describe("daily-driver notifications", () => {
+  it("derives only attention state notifications from semantic agent events", () => {
+    const blocked = { ...createLargeDemoSnapshot().agents[1]!, status: "blocked" as const };
+    expect(notificationFromEvent({ type: "agent.upserted", revision: 41, agent: blocked })).toMatchObject({ kind: "blocked", agentId: blocked.id });
+    expect(notificationFromEvent({ type: "heartbeat", revision: 42 })).toBeUndefined();
+    expect(notificationFromEvent({ type: "agent.upserted", revision: 43, agent: { ...blocked, status: "working" } })).toBeUndefined();
+    expect(notificationFromEvent({ type: "agent.upserted", revision: 44, agent: { ...blocked, status: "done" } })).toMatchObject({ kind: "completed" });
+    expect(notificationFromEvent({ type: "agent.upserted", revision: 45, agent: { ...blocked, status: "error" } })).toMatchObject({ kind: "error" });
+  });
+
+  it("applies global type and session-only provider/project controls", () => {
+    const notification = { kind: "error" as const, agentId: "session-id", agentName: "Agent", provider: "public-provider", project: "public-project" };
+    const enabled = { ...defaultPreferences.notifications, enabled: true };
+    expect(shouldNotify(notification, enabled, new Set(), new Set())).toBe(true);
+    expect(shouldNotify(notification, enabled, new Set([notification.provider]), new Set())).toBe(false);
+    expect(shouldNotify(notification, enabled, new Set(), new Set([notification.project]))).toBe(false);
+    expect(shouldNotify(notification, { ...enabled, error: false }, new Set(), new Set())).toBe(false);
+  });
+
+  it("elects one tab without broadcasting agent data", async () => {
+    class MemoryChannel {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      readonly messages: unknown[] = [];
+      peer: MemoryChannel | undefined;
+      postMessage(message: unknown) {
+        this.messages.push(message);
+        this.peer?.onmessage?.({ data: message } as MessageEvent<unknown>);
+      }
+      close() {}
+    }
+    const leftChannel = new MemoryChannel();
+    const rightChannel = new MemoryChannel();
+    leftChannel.peer = rightChannel;
+    rightChannel.peer = leftChannel;
+    const left = new BrowserNotificationCoordinator({ tabId: "a", channel: leftChannel, settleMs: 0 });
+    const right = new BrowserNotificationCoordinator({ tabId: "b", channel: rightChannel, settleMs: 0 });
+    let deliveries = 0;
+
+    await Promise.all([
+      left.runOnce("41:blocked", () => { deliveries += 1; }),
+      right.runOnce("41:blocked", () => { deliveries += 1; }),
+    ]);
+
+    expect(deliveries).toBe(1);
+    expect(JSON.stringify([...leftChannel.messages, ...rightChannel.messages])).not.toMatch(/agent|project|provider|cwd/i);
+    left.close();
+    right.close();
+  });
+});

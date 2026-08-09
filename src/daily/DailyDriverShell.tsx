@@ -2,6 +2,7 @@ import { KeyRound, LockKeyhole, RotateCcw, Server, ShieldAlert, WifiOff } from "
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { App } from "../App.js";
 import { normalizeAgentHostBaseUrl } from "../http/fetch-channel.js";
+import { BrowserNotificationCoordinator, BrowserNotificationGateway, type NotificationCoordinator, type NotificationGateway } from "./notifications.js";
 import { defaultPreferences, type DashboardPreferences, type PreferenceStore } from "./preferences.js";
 import {
   MemoryCredentialVault,
@@ -18,7 +19,7 @@ const failureCopy: Record<SessionFailure, { readonly icon: ReactNode; readonly t
   error: { icon: <ShieldAlert aria-hidden="true" />, title: "Connection could not be opened", guidance: "Review the endpoint and retry. No credential was retained." },
 };
 
-export function DailyDriverShell({ connector, preferenceStore, environmentNotice }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string }) {
+export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator }) {
   const [preferences, setPreferences] = useState(() => preferenceStore.load());
   const [lease, setLease] = useState<ClientLease>();
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -27,6 +28,8 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const activeCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
+  const notifications = useRef(notificationGateway ?? new BrowserNotificationGateway());
+  const notificationOwnership = useRef(notificationCoordinator ?? new BrowserNotificationCoordinator());
   const leaseRef = useRef<ClientLease | undefined>(undefined);
   const activeEndpoint = useRef<string | undefined>(undefined);
   const attempt = useRef<{ readonly generation: number; readonly controller: AbortController; readonly vault?: MemoryCredentialVault }>({ generation: 0, controller: new AbortController() });
@@ -40,6 +43,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     attempt.current.vault?.clear();
     leaseRef.current?.close();
     activeCredentialVault.current?.clear();
+    notificationOwnership.current.close();
   }, []);
 
   const updatePreferences = (update: DashboardPreferences | ((current: DashboardPreferences) => DashboardPreferences)) => {
@@ -164,6 +168,8 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
           setPreferences(defaultPreferences);
         },
         ...(environmentNotice ? { environmentNotice } : {}),
+        notificationGateway: notifications.current,
+        notificationCoordinator: notificationOwnership.current,
       }} /></div>}
       {showOnboarding && <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">
