@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createLargeDemoSnapshot, demoAgents } from "../src/testing/fixtures.js";
+import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 
 describe("sanitized fixtures", () => {
   it("contain all representative statuses and capability combinations", () => {
@@ -17,5 +18,25 @@ describe("sanitized fixtures", () => {
     expect(snapshot.agents).toHaveLength(1_000);
     expect(serialized).not.toMatch(/token|authorization|users\//i);
     expect(serialized).not.toContain("hiraoku");
+  });
+
+  it("accepts zero and rejects invalid large-fixture counts", () => {
+    expect(createLargeDemoSnapshot(0)).toMatchObject({ agents: [], total: 0 });
+    for (const count of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => createLargeDemoSnapshot(count)).toThrow(RangeError);
+    }
+  });
+
+  it("resolves detail from the snapshot selected by the mock transport", async () => {
+    const transport = new MockAgentHostTransport();
+    const selected = createLargeDemoSnapshot(1);
+    transport.snapshots = [selected];
+    await transport.snapshot({});
+
+    await expect(transport.detail(selected.agents[0]!.id)).resolves.toMatchObject({
+      id: selected.agents[0]!.id,
+      pendingApprovals: [],
+    });
+    await expect(transport.detail(demoAgents[1]!.id)).rejects.toMatchObject({ code: "not_found" });
   });
 });

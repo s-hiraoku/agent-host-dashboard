@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decodeSseStream } from "../src/http/sse.js";
 
 function chunked(...chunks: string[]): ReadableStream<Uint8Array> {
@@ -40,5 +40,22 @@ describe("decodeSseStream", () => {
     for await (const frame of decodeSseStream(stream)) frames.push(frame);
 
     expect(frames).toEqual([{ event: "update", data: "one" }]);
+  });
+
+  it("cancels the response body when iteration stops early", async () => {
+    const cancel = vi.fn();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: one\n\n"));
+      },
+      cancel,
+    });
+    const iterator = decodeSseStream(stream)[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({ value: { data: "one" }, done: false });
+    await iterator.return?.();
+
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });

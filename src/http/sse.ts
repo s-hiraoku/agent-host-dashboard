@@ -32,6 +32,8 @@ export async function* decodeSseStream(stream: ReadableStream<Uint8Array>): Asyn
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let completed = false;
+  let readFailure: unknown;
 
   try {
     while (true) {
@@ -55,13 +57,27 @@ export async function* decodeSseStream(stream: ReadableStream<Uint8Array>): Asyn
 
     buffer = buffer.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
     const finalFrame = parseBlock(buffer);
+    completed = true;
     if (finalFrame) yield finalFrame;
   } catch (error) {
+    readFailure = error;
     throw new AgentHostError("connection_failed", "The event stream could not be read.", {
       retryable: true,
       cause: error,
     });
   } finally {
+    if (!completed) {
+      try {
+        await reader.cancel(readFailure);
+      } catch (cancelError) {
+        if (readFailure === undefined) {
+          throw new AgentHostError("connection_failed", "The abandoned event stream could not be cancelled.", {
+            retryable: true,
+            cause: cancelError,
+          });
+        }
+      }
+    }
     reader.releaseLock();
   }
 }

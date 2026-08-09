@@ -50,6 +50,7 @@ function combineSignals(parent: AbortSignal | undefined, timeoutMs: number): { s
 export class DefaultAgentHostClient implements AgentHostClient {
   private readonly requestTimeoutMs: number;
   private readonly supportedApiVersions: ReadonlySet<string>;
+  private trustedApiInfo: ApiInfo | undefined;
 
   constructor(
     private readonly transport: AgentHostTransport,
@@ -61,47 +62,62 @@ export class DefaultAgentHostClient implements AgentHostClient {
 
   private async request<T>(operation: (options: RequestOptions) => Promise<T>, options?: RequestOptions): Promise<T> {
     const deadline = combineSignals(options?.signal, this.requestTimeoutMs);
+    let rejectAbort: (() => void) | undefined;
     try {
-      return await operation({ signal: deadline.signal });
+      if (deadline.signal.aborted) throw toAgentHostError(deadline.signal.reason);
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = () => reject(toAgentHostError(deadline.signal.reason));
+        deadline.signal.addEventListener("abort", rejectAbort, { once: true });
+      });
+      return await Promise.race([operation({ signal: deadline.signal }), aborted]);
     } catch (error) {
       if (deadline.signal.aborted) throw toAgentHostError(deadline.signal.reason);
       throw toAgentHostError(error);
     } finally {
+      if (rejectAbort) deadline.signal.removeEventListener("abort", rejectAbort);
       deadline.dispose();
     }
   }
 
   async discover(options?: RequestOptions): Promise<ApiInfo> {
+    if (options?.signal?.aborted) throw toAgentHostError(options.signal.reason);
+    if (this.trustedApiInfo) return this.trustedApiInfo;
     const info = await this.request((requestOptions) => this.transport.discover(requestOptions), options);
     if (!this.supportedApiVersions.has(info.apiVersion)) {
       throw new AgentHostError("incompatible_version", `Unsupported agent-host API version: ${info.apiVersion}.`, {
         details: { supported: [...this.supportedApiVersions], received: info.apiVersion },
       });
     }
+    this.trustedApiInfo = info;
     return info;
   }
 
-  snapshot(request: AgentPageRequest = {}, options?: RequestOptions): Promise<AgentSnapshot> {
-    return this.request((requestOptions) => this.transport.snapshot(request, requestOptions), options);
+  async snapshot(request: AgentPageRequest = {}, options?: RequestOptions): Promise<AgentSnapshot> {
+    await this.discover(options);
+    return await this.request((requestOptions) => this.transport.snapshot(request, requestOptions), options);
   }
 
-  detail(agentId: string, options?: RequestOptions): Promise<AgentDetail> {
-    return this.request((requestOptions) => this.transport.detail(agentId, requestOptions), options);
+  async detail(agentId: string, options?: RequestOptions): Promise<AgentDetail> {
+    await this.discover(options);
+    return await this.request((requestOptions) => this.transport.detail(agentId, requestOptions), options);
   }
 
-  adapterHealth(options?: RequestOptions): Promise<readonly AdapterHealth[]> {
-    return this.request((requestOptions) => this.transport.adapterHealth(requestOptions), options);
+  async adapterHealth(options?: RequestOptions): Promise<readonly AdapterHealth[]> {
+    await this.discover(options);
+    return await this.request((requestOptions) => this.transport.adapterHealth(requestOptions), options);
   }
 
   async action(target: ActionTarget, action: AgentAction, options?: RequestOptions): Promise<AgentActionResult> {
     if (!canPerform(target.capabilities, action.kind)) {
       throw new AgentHostError("capability_unavailable", `Agent ${target.id} does not support ${action.kind}.`);
     }
+    await this.discover(options);
     return await this.request((requestOptions) => this.transport.action(target, action, requestOptions), options);
   }
 
-  events(options: EventStreamOptions): AsyncIterable<AgentEvent> {
-    return this.transport.events(options);
+  async *events(options: EventStreamOptions): AsyncIterable<AgentEvent> {
+    await this.discover(options.signal === undefined ? undefined : { signal: options.signal });
+    yield* this.transport.events(options);
   }
 
   connect(observer: ConnectionObserver, options?: ConnectionOptions): AgentHostConnection {

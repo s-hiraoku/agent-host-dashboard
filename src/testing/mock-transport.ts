@@ -11,7 +11,7 @@ import type {
 } from "../domain.js";
 import { AgentHostError } from "../errors.js";
 import type { AgentHostTransport, EventStreamOptions, RequestOptions } from "../transport.js";
-import { createDemoSnapshot, demoAdapterHealth, demoAgents } from "./fixtures.js";
+import { createDemoSnapshot, demoAdapterHealth } from "./fixtures.js";
 
 export class MockAgentHostTransport implements AgentHostTransport {
   apiInfo: ApiInfo = { apiVersion: "1", serverVersion: "demo", features: ["events-after-revision"] };
@@ -32,9 +32,12 @@ export class MockAgentHostTransport implements AgentHostTransport {
   }
 
   async detail(agentId: string, _options?: RequestOptions): Promise<AgentDetail> {
-    const agent = demoAgents.find((candidate) => candidate.id === agentId);
+    const agent = this.currentSnapshot.agents.find((candidate) => candidate.id === agentId);
     if (!agent) throw new AgentHostError("not_found", `Unknown demo agent: ${agentId}.`, { status: 404 });
-    return agent;
+    return {
+      ...agent,
+      pendingApprovals: "pendingApprovals" in agent && Array.isArray(agent.pendingApprovals) ? agent.pendingApprovals : [],
+    };
   }
 
   async adapterHealth(_options?: RequestOptions): Promise<readonly AdapterHealth[]> {
@@ -47,6 +50,7 @@ export class MockAgentHostTransport implements AgentHostTransport {
   }
 
   async *events(options: EventStreamOptions): AsyncIterable<AgentEvent> {
+    if (options.signal?.aborted) throw options.signal.reason;
     const stream = this.eventStreams.shift() ?? [];
     if (stream instanceof AgentHostError) throw stream;
     for (const event of stream) {

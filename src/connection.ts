@@ -102,8 +102,37 @@ async function runConnection(
   state(observer, "connecting", attempt, revision);
 
   try {
-    await client.discover({ signal });
-    let snapshot = await client.snapshot({}, { signal });
+    let snapshot: AgentSnapshot;
+    while (true) {
+      try {
+        await client.discover({ signal });
+        snapshot = await client.snapshot({}, { signal });
+        attempt = 0;
+        break;
+      } catch (error) {
+        if (signal.aborted) return;
+        const failure = toAgentHostError(error);
+        observer.onError?.(failure);
+        if (failure.code === "unauthorized") {
+          state(observer, "unauthorized", attempt, revision, failure.message);
+          return;
+        }
+        if (failure.code === "incompatible_version") {
+          state(observer, "incompatible", attempt, revision, failure.message);
+          return;
+        }
+        if (!failure.retryable) {
+          state(observer, "disconnected", attempt, revision, failure.message);
+          return;
+        }
+        attempt += 1;
+        state(observer, "reconnecting", attempt, revision, failure.message);
+        await scheduler.sleep(
+          backoff(attempt, initialBackoffMs, maxBackoffMs, jitterRatio, scheduler.random()),
+          signal,
+        );
+      }
+    }
     revision = snapshot.revision;
     observer.onSnapshot(snapshot);
 
@@ -122,7 +151,10 @@ async function runConnection(
             observer.onError?.(gap);
             state(observer, "stale", attempt, revision, gap.message);
             consecutiveResyncs += 1;
-            if (consecutiveResyncs > maxConsecutiveResyncs) throw gap;
+            if (consecutiveResyncs > maxConsecutiveResyncs) {
+              state(observer, "disconnected", attempt, revision, "Repeated revision gaps prevented synchronization.");
+              return;
+            }
             snapshot = await client.snapshot({}, { signal });
             revision = snapshot.revision;
             observer.onSnapshot(snapshot);
@@ -151,6 +183,10 @@ async function runConnection(
           return;
         }
         observer.onError?.(failure);
+        if (!failure.retryable) {
+          state(observer, "disconnected", attempt, revision, failure.message);
+          return;
+        }
         attempt += 1;
         state(observer, "reconnecting", attempt, revision, failure.message);
         await scheduler.sleep(

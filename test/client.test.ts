@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DefaultAgentHostClient } from "../src/client.js";
 import { AgentHostError } from "../src/errors.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
@@ -30,15 +30,25 @@ describe("DefaultAgentHostClient", () => {
     });
   });
 
-  it("rejects unsupported API versions before reading a snapshot", async () => {
+  it("rejects unsupported API versions before any direct protocol operation", async () => {
     const transport = new MockAgentHostTransport();
     transport.apiInfo = { apiVersion: "2", features: [] };
+    const snapshot = vi.spyOn(transport, "snapshot");
+    const action = vi.spyOn(transport, "action");
     const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
 
-    await expect(client.discover()).rejects.toMatchObject({
+    await expect(client.snapshot()).rejects.toMatchObject({
       code: "incompatible_version",
       details: { supported: ["1"], received: "2" },
     });
+    await expect(
+      client.action({ id: "demo", capabilities: { read: true } }, { kind: "read" }),
+    ).rejects.toMatchObject({ code: "incompatible_version" });
+    await expect(client.events({ afterRevision: 0 })[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      code: "incompatible_version",
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(action).not.toHaveBeenCalled();
   });
 
   it("times out requests and cancels their transport signal", async () => {
@@ -47,6 +57,14 @@ describe("DefaultAgentHostClient", () => {
       new Promise((_resolve, reject) => {
         options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
       });
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"], requestTimeoutMs: 5 });
+
+    await expect(client.snapshot()).rejects.toMatchObject({ code: "timeout", retryable: true });
+  });
+
+  it("settles a timeout even when the transport ignores cancellation", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.snapshot = () => new Promise(() => undefined);
     const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"], requestTimeoutMs: 5 });
 
     await expect(client.snapshot()).rejects.toMatchObject({ code: "timeout", retryable: true });

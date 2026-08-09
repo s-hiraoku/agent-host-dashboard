@@ -87,6 +87,62 @@ describe("agent-host connection", () => {
     expect(recorded.states.some((value) => value.status === "reconnecting" && value.attempt === 1)).toBe(true);
   });
 
+  it("retries initial discovery failures until the host becomes available", async () => {
+    const transport = new MockAgentHostTransport();
+    let attempts = 0;
+    transport.discover = async () => {
+      attempts += 1;
+      if (attempts === 1) throw new AgentHostError("connection_failed", "host starting", { retryable: true });
+      return transport.apiInfo;
+    };
+    transport.eventStreams = [[{ type: "heartbeat", revision: 41 }]];
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    let close: () => void = () => undefined;
+    const recorded = recorder(() => close());
+    const connection = client.connect(recorded.observer, { scheduler: immediateScheduler });
+    close = connection.close;
+    await connection.completed;
+
+    expect(attempts).toBe(2);
+    expect(recorded.states.some((value) => value.status === "reconnecting")).toBe(true);
+    expect(recorded.snapshots).toHaveLength(1);
+  });
+
+  it("disconnects without retrying a permanent stream failure", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.eventStreams = [new AgentHostError("invalid_response", "wrong media type")];
+    const delays: number[] = [];
+    const scheduler: ConnectionScheduler = {
+      sleep: async (delay) => {
+        delays.push(delay);
+      },
+      random: () => 0.5,
+    };
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const recorded = recorder();
+    await client.connect(recorded.observer, { scheduler }).completed;
+
+    expect(delays).toEqual([]);
+    expect(recorded.states.at(-1)?.status).toBe("disconnected");
+  });
+
+  it("stops after repeated revision gaps instead of reconnecting forever", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.snapshots = [createDemoSnapshot(40), createDemoSnapshot(42), createDemoSnapshot(44)];
+    transport.eventStreams = [
+      [{ type: "heartbeat", revision: 42 }],
+      [{ type: "heartbeat", revision: 44 }],
+      [{ type: "heartbeat", revision: 46 }],
+    ];
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const recorded = recorder();
+    await client.connect(recorded.observer, { scheduler: immediateScheduler, maxConsecutiveResyncs: 2 }).completed;
+
+    expect(recorded.snapshots.map((snapshot) => snapshot.revision)).toEqual([40, 42, 44]);
+    expect(recorded.states.at(-1)?.status).toBe("disconnected");
+    expect(recorded.states.at(-1)?.reason).toMatch(/Repeated revision gaps/);
+  });
+
   it("stops reconnecting for unauthorized and incompatible states", async () => {
     const unauthorizedTransport = new MockAgentHostTransport();
     unauthorizedTransport.eventStreams = [new AgentHostError("unauthorized", "rotate token", { status: 401 })];
@@ -101,5 +157,17 @@ describe("agent-host connection", () => {
     const incompatible = recorder();
     await incompatibleClient.connect(incompatible.observer, { scheduler: immediateScheduler }).completed;
     expect(incompatible.states.at(-1)?.status).toBe("incompatible");
+  });
+
+  it("does not consume a queued event stream when already cancelled", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.eventStreams = [[{ type: "heartbeat", revision: 41 }]];
+    const controller = new AbortController();
+    controller.abort(new DOMException("cancelled", "AbortError"));
+
+    await expect(
+      transport.events({ afterRevision: 40, signal: controller.signal })[Symbol.asyncIterator]().next(),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(transport.eventStreams).toHaveLength(1);
   });
 });

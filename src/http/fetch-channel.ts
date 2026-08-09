@@ -17,8 +17,21 @@ export interface FetchHttpChannelOptions {
 }
 
 function validateBaseUrl(baseUrl: string, allowRemoteHttps: boolean): void {
-  if (baseUrl.startsWith("/")) return;
-  const url = new URL(baseUrl);
+  if (baseUrl.startsWith("/")) {
+    if (baseUrl.startsWith("//") || baseUrl.includes("?") || baseUrl.includes("#")) {
+      throw new AgentHostError(
+        "unsupported",
+        "Same-origin connection paths must start with one slash and cannot contain query parameters or fragments.",
+      );
+    }
+    return;
+  }
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch (error) {
+    throw new AgentHostError("unsupported", "The agent-host connection URL is invalid.", { cause: error });
+  }
   if (url.username || url.password || url.search || url.hash) {
     throw new AgentHostError("unsupported", "Connection URLs cannot contain credentials, query parameters, or fragments.");
   }
@@ -86,6 +99,14 @@ export class FetchHttpChannel implements HttpChannel {
       throw new AgentHostError("connection_failed", "Could not reach agent-host.", { retryable: true, cause: error });
     }
 
+    if (!response.ok) {
+      const requestId = response.headers.get("x-request-id") ?? undefined;
+      throw new AgentHostError(errorCode(response.status), `agent-host request failed with HTTP ${response.status}.`, {
+        status: response.status,
+        retryable: response.status === 429 || response.status >= 500,
+        ...(requestId === undefined ? {} : { requestId }),
+      });
+    }
     let body: unknown;
     try {
       body = response.status === 204 ? undefined : await response.json();
@@ -93,14 +114,6 @@ export class FetchHttpChannel implements HttpChannel {
       throw new AgentHostError("invalid_response", "agent-host returned invalid JSON.", {
         status: response.status,
         cause: error,
-      });
-    }
-    if (!response.ok) {
-      const requestId = response.headers.get("x-request-id") ?? undefined;
-      throw new AgentHostError(errorCode(response.status), `agent-host request failed with HTTP ${response.status}.`, {
-        status: response.status,
-        retryable: response.status === 429 || response.status >= 500,
-        ...(requestId === undefined ? {} : { requestId }),
       });
     }
     return { status: response.status, headers: response.headers, body: body as T };
@@ -122,9 +135,17 @@ export class FetchHttpChannel implements HttpChannel {
       });
     }
     if (!response.ok) {
+      const requestId = response.headers.get("x-request-id") ?? undefined;
       throw new AgentHostError(errorCode(response.status), `Event stream failed with HTTP ${response.status}.`, {
         status: response.status,
         retryable: response.status === 429 || response.status >= 500,
+        ...(requestId === undefined ? {} : { requestId }),
+      });
+    }
+    const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (mediaType !== "text/event-stream") {
+      throw new AgentHostError("invalid_response", "The event stream response was not text/event-stream.", {
+        status: response.status,
       });
     }
     if (!response.body) throw new AgentHostError("invalid_response", "The event stream response had no body.");

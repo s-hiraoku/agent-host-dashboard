@@ -110,6 +110,9 @@ export function createDemoSnapshot(revision = 40): AgentSnapshot {
 }
 
 export function createLargeDemoSnapshot(count = 1_000, revision = 40): AgentSnapshot {
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new RangeError("count must be a non-negative safe integer.");
+  }
   const statuses = ["idle", "working", "blocked", "done", "error", "unknown"] as const;
   const agents = Array.from({ length: count }, (_, index) => {
     const seed = demoAgents[index % demoAgents.length]!;

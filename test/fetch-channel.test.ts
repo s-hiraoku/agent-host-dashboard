@@ -43,6 +43,9 @@ describe("FetchHttpChannel", () => {
     expect(
       () => new FetchHttpChannel({ baseUrl: "https://agents.example.test", allowRemoteHttps: true }),
     ).not.toThrow();
+    expect(() => new FetchHttpChannel({ baseUrl: "//agents.example.test" })).toThrow(/one slash/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host?token=secret" })).toThrow(/query parameters/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host#fragment" })).toThrow(/fragments/);
   });
 
   it("maps authorization responses to structured errors without logging bodies", async () => {
@@ -58,6 +61,40 @@ describe("FetchHttpChannel", () => {
       code: "unauthorized",
       status: 401,
       requestId: "request-demo",
+    });
+  });
+
+  it("classifies a non-JSON authorization failure before parsing its body", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response("<html>unauthorized</html>", {
+        status: 401,
+        headers: { "content-type": "text/html", "x-request-id": "request-html" },
+      }),
+    );
+    const channel = new FetchHttpChannel({ fetch });
+
+    await expect(channel.request({ path: "/v1/private" })).rejects.toMatchObject({
+      code: "unauthorized",
+      status: 401,
+      requestId: "request-html",
+    });
+  });
+
+  it("requires an event-stream content type while allowing parameters", async () => {
+    const validFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response("data: ok\n\n", { headers: { "content-type": "text/event-stream; charset=utf-8" } }),
+    );
+    const valid = new FetchHttpChannel({ fetch: validFetch });
+    const frames = [];
+    for await (const frame of valid.events({ path: "/v1/events" })) frames.push(frame);
+    expect(frames).toEqual([{ data: "ok" }]);
+
+    const invalidFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response("{}", { headers: { "content-type": "application/json" } }),
+    );
+    const invalid = new FetchHttpChannel({ fetch: invalidFetch });
+    await expect(invalid.events({ path: "/v1/events" })[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      code: "invalid_response",
     });
   });
 });
