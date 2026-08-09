@@ -43,6 +43,11 @@ function updateVisibleFacets(
   return { byStatus, byProvider };
 }
 
+function invalidateFacets(snapshot: AgentSnapshot, revision: number): AgentSnapshot {
+  const { facets: _facets, ...withoutFacets } = snapshot;
+  return { ...withoutFacets, revision };
+}
+
 export function applyVisibleEvent(
   snapshot: AgentSnapshot,
   event: AgentEvent,
@@ -51,7 +56,7 @@ export function applyVisibleEvent(
   if (event.revision <= snapshot.revision) return snapshot;
   if (event.type === "agent.upserted") {
     const index = snapshot.agents.findIndex((agent) => agent.id === event.agent.id);
-    if (index === -1) return { ...snapshot, revision: event.revision };
+    if (index === -1) return invalidateFacets(snapshot, event.revision);
     const agents = [...snapshot.agents];
     const previous = agents[index]!;
     if (!matches(event.agent)) {
@@ -71,7 +76,7 @@ export function applyVisibleEvent(
   }
   if (event.type === "agent.removed") {
     const previous = snapshot.agents.find((agent) => agent.id === event.agentId);
-    if (!previous) return { ...snapshot, revision: event.revision };
+    if (!previous) return invalidateFacets(snapshot, event.revision);
     const facets = updateVisibleFacets(snapshot, previous, undefined);
     return {
       ...snapshot,

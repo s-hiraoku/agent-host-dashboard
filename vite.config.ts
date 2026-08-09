@@ -1,11 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-function safeAgentHostTarget(rawTarget: string): string {
+export function safeAgentHostTarget(rawTarget: string): string {
   const target = new URL(rawTarget);
   const loopback = target.hostname === "127.0.0.1" || target.hostname === "[::1]" || target.hostname === "localhost";
-  if ((!loopback || target.protocol !== "http:") && target.protocol !== "https:") {
-    throw new Error("AGENT_HOST_URL must be loopback HTTP or HTTPS.");
+  if (
+    !loopback ||
+    (target.protocol !== "http:" && target.protocol !== "https:") ||
+    target.username ||
+    target.password ||
+    target.search ||
+    target.hash
+  ) {
+    throw new Error("AGENT_HOST_URL must be a loopback HTTP(S) URL without credentials, query parameters, or fragments.");
   }
   return target.toString();
 }

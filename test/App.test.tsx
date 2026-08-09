@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { userEvent } from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { App, type DailyDriverControls } from "../src/App.js";
 import { DefaultAgentHostClient } from "../src/client.js";
 import { AgentHostError } from "../src/errors.js";
@@ -215,6 +215,43 @@ describe("evaluation dashboard", () => {
     expect(screen.getByText("50 shown of 1001")).toBeInTheDocument();
   });
 
+  it("does not refetch selected detail for unrelated connection events", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    transport.eventStreams = [[
+      { type: "adapter.health", revision: 41, adapter: transport.health[0]! },
+      { type: "heartbeat", revision: 42 },
+    ]];
+    const detail = vi.spyOn(transport, "detail");
+    renderDashboard(transport);
+    await waitFor(() => expect(detail).toHaveBeenCalled());
+    const callsBeforeEvents = detail.mock.calls.length;
+
+    releaseEvents();
+    await screen.findByText("r42");
+    expect(detail).toHaveBeenCalledTimes(callsBeforeEvents);
+  });
+
+  it("refreshes selected detail when that agent changes", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const selected = createLargeDemoSnapshot().agents[1]!;
+    transport.eventStreams = [[{
+      type: "agent.upserted",
+      revision: 41,
+      agent: { ...selected, name: "Updated selected agent" },
+    }]];
+    const detail = vi.spyOn(transport, "detail");
+    renderDashboard(transport);
+    await waitFor(() => expect(detail).toHaveBeenCalled());
+    const callsBeforeEvent = detail.mock.calls.length;
+
+    releaseEvents();
+    await waitFor(() => expect(detail.mock.calls.length).toBeGreaterThan(callsBeforeEvent));
+  });
+
   it("preserves an unsent draft across an SSE reconnect", async () => {
     let releaseStream: () => void = () => undefined;
     const transport = new MockAgentHostTransport();
@@ -259,6 +296,23 @@ describe("evaluation dashboard", () => {
     expect(gateway.shown[0]?.title).toContain("is blocked");
     gateway.shown[0]?.onClick?.();
     await waitFor(() => expect(document.querySelector(".workspace")).toHaveFocus());
+  });
+
+  it("does not replay attention events that occurred before notification opt-in", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const blocked = { ...createLargeDemoSnapshot().agents[0]!, status: "blocked" as const };
+    transport.eventStreams = [[{ type: "agent.upserted", revision: 41, agent: blocked }]];
+    const { gateway, user } = renderDailyDashboard(transport);
+    await screen.findByText("50 shown of 1000");
+
+    releaseEvents();
+    await screen.findByText("r41");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Enable desktop notifications" }));
+    await waitFor(() => expect(screen.getByText(/Browser permission:/)).toHaveTextContent("granted"));
+    expect(gateway.shown).toHaveLength(0);
   });
 
   it("does not infer a transition for an existing attention agent outside the loaded page", async () => {

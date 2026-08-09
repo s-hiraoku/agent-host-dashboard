@@ -44,6 +44,8 @@ describe("FetchHttpChannel", () => {
       () => new FetchHttpChannel({ baseUrl: "https://agents.example.test", allowRemoteHttps: true }),
     ).not.toThrow();
     expect(() => new FetchHttpChannel({ baseUrl: "//agents.example.test" })).toThrow(/one slash/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/\\evil.example" })).toThrow(/backslashes/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host\\escape" })).toThrow(/backslashes/);
     expect(() => new FetchHttpChannel({ baseUrl: "/agent-host?token=secret" })).toThrow(/query parameters/);
     expect(() => new FetchHttpChannel({ baseUrl: "/agent-host#fragment" })).toThrow(/fragments/);
   });

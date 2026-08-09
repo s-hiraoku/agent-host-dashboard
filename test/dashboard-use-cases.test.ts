@@ -68,6 +68,23 @@ describe("dashboard use cases", () => {
     expect(reconciled.facets?.byProvider["demo-alpha"]).toBe(9);
   });
 
+  it("invalidates aggregate facets when an off-page event cannot be reconciled safely", () => {
+    const snapshot = {
+      ...createLargeDemoSnapshot(100),
+      agents: createLargeDemoSnapshot(100).agents.slice(0, 50),
+      facets: { byStatus: { working: 100 }, byProvider: { "demo-alpha": 100 } },
+    };
+    const updated = applyVisibleEvent(snapshot, {
+      type: "agent.upserted",
+      revision: 41,
+      agent: { ...createLargeDemoSnapshot(100).agents[60]!, status: "blocked" },
+    });
+
+    expect(updated.facets).toBeUndefined();
+    expect(updated.agents).toEqual(snapshot.agents);
+    expect(updated.revision).toBe(41);
+  });
+
   it("prioritizes blocked and error agents without provider-specific rules", () => {
     const snapshot = createLargeDemoSnapshot(12);
     expect(findAttentionAgent(snapshot.agents)?.status).toBe("blocked");

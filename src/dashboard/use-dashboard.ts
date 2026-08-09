@@ -112,6 +112,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const [actionResult, setActionResult] = useState<AgentActionResult>();
   const [actionHistory, setActionHistory] = useState<readonly DashboardActionRecord[]>([]);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
+  const [detailGeneration, setDetailGeneration] = useState(0);
   const actionSequence = useRef(0);
   const queryRef = useRef(query);
   const cursorRef = useRef<string | undefined>(undefined);
@@ -119,6 +120,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const requestController = useRef<AbortController | undefined>(undefined);
   const eventBuffer = useRef<readonly AgentEvent[]>([]);
   const visibleAgentIds = useRef(new Set<string>());
+  const selectedIdRef = useRef<string | undefined>(undefined);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const knownStatuses = useRef(new Map<string, AgentStatus>());
   const snapshotReady = useRef(false);
@@ -149,7 +151,11 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       setApiInfo(nextApiInfo);
       setHealth(nextHealth);
       setOperationError(undefined);
-      setSelectedId((current) => current ?? nextSnapshot.agents[0]?.id);
+      setSelectedId((current) => {
+        const next = current ?? reconciledSnapshot.agents[0]?.id;
+        selectedIdRef.current = next;
+        return next;
+      });
     } catch (failure) {
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
       setOperationError(toAgentHostError(failure).message);
@@ -184,6 +190,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         if (active) {
           knownStatuses.current = new Map(authoritativeSnapshot.agents.map((agent) => [agent.id, agent.status]));
           snapshotReady.current = true;
+          if (selectedIdRef.current) setDetailGeneration((current) => current + 1);
           void load();
         }
       },
@@ -192,8 +199,9 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         if (event.type === "agent.upserted") {
           const matches = matchesQuery(event.agent, queryRef.current);
           const visible = visibleAgentIds.current.has(event.agent.id);
-          if (!visible && matches) scheduleReload();
+          if (!visible) scheduleReload();
           else if (visible && !matches) visibleAgentIds.current.delete(event.agent.id);
+          if (event.agent.id === selectedIdRef.current) setDetailGeneration((current) => current + 1);
           const previousStatus = knownStatuses.current.get(event.agent.id);
           knownStatuses.current.set(event.agent.id, event.agent.status);
           const attentionStatus = event.agent.status === "blocked" || event.agent.status === "done" || event.agent.status === "error";
@@ -201,8 +209,12 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
             setNotificationEvents((current) => [event, ...current].slice(0, 100));
           }
         } else if (event.type === "agent.removed") {
+          if (!visibleAgentIds.current.has(event.agentId)) scheduleReload();
           knownStatuses.current.delete(event.agentId);
           visibleAgentIds.current.delete(event.agentId);
+          if (event.agentId === selectedIdRef.current) setDetailGeneration((current) => current + 1);
+        } else if (event.type === "action.completed" && event.agentId === selectedIdRef.current) {
+          setDetailGeneration((current) => current + 1);
         }
         eventBuffer.current = [...eventBuffer.current, event].slice(-500);
         setEvents((current) => [event, ...current].slice(0, 100));
@@ -239,7 +251,12 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         if (!controller.signal.aborted) setOperationError(toAgentHostError(failure).message);
       });
     return () => controller.abort();
-  }, [client, selectedId, snapshot?.revision]);
+  }, [client, detailGeneration, selectedId]);
+
+  const select = useCallback((agentId: string) => {
+    selectedIdRef.current = agentId;
+    setSelectedId(agentId);
+  }, []);
 
   const setQuery = useCallback(
     (nextQuery: DashboardQuery) => {
@@ -315,7 +332,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       actionResult,
       actionHistory,
       setQuery,
-      select: setSelectedId,
+      select,
       nextPage,
       previousPage,
       refresh: load,
@@ -342,6 +359,8 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       previousPage,
       query,
       selectedId,
+      select,
+      setQuery,
       snapshot,
     ],
   );
