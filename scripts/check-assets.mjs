@@ -1,14 +1,15 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
-const assetDirectory = new URL("../dist/assets/", import.meta.url);
+const assetDirectory = fileURLToPath(new URL("../dist/assets/", import.meta.url));
 const entries = await readdir(assetDirectory);
 const measured = await Promise.all(
   entries
     .filter((name) => name.endsWith(".js") || name.endsWith(".css"))
     .map(async (name) => {
-      const bytes = await readFile(join(assetDirectory.pathname, name));
+      const bytes = await readFile(join(assetDirectory, name));
       return { name, raw: bytes.byteLength, gzip: gzipSync(bytes).byteLength };
     }),
 );

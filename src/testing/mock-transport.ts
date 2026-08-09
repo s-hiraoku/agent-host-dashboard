@@ -11,11 +11,12 @@ import type {
 } from "../domain.js";
 import { AgentHostError } from "../errors.js";
 import type { AgentHostTransport, EventStreamOptions, RequestOptions } from "../transport.js";
-import { createDemoSnapshot, demoAdapterHealth } from "./fixtures.js";
+import { createDemoSnapshot, demoAdapterHealth, demoAgents } from "./fixtures.js";
 
 export class MockAgentHostTransport implements AgentHostTransport {
   apiInfo: ApiInfo = { apiVersion: "1", serverVersion: "demo", features: ["events-after-revision"] };
   currentSnapshot: AgentSnapshot = createDemoSnapshot();
+  readonly details = new Map<string, AgentDetail>(demoAgents.map((agent) => [agent.id, agent]));
   snapshots: AgentSnapshot[] = [];
   health: readonly AdapterHealth[] = demoAdapterHealth;
   eventStreams: Array<readonly AgentEvent[] | AgentHostError> = [];
@@ -84,9 +85,11 @@ export class MockAgentHostTransport implements AgentHostTransport {
   async detail(agentId: string, _options?: RequestOptions): Promise<AgentDetail> {
     const summary = this.currentSnapshot.agents.find((candidate) => candidate.id === agentId);
     if (!summary) throw new AgentHostError("not_found", `Unknown demo agent: ${agentId}.`, { status: 404 });
+    const recordedDetail = this.details.get(agentId);
     const recordedApprovals =
-      "pendingApprovals" in summary && Array.isArray(summary.pendingApprovals) ? summary.pendingApprovals : [];
+      recordedDetail && Array.isArray(recordedDetail.pendingApprovals) ? recordedDetail.pendingApprovals : [];
     return {
+      ...recordedDetail,
       ...summary,
       pendingApprovals:
         recordedApprovals.length > 0

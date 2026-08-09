@@ -3,6 +3,14 @@ import { createLargeDemoSnapshot, demoAgents } from "../src/testing/fixtures.js"
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 
 describe("sanitized fixtures", () => {
+  it("keeps full detail records separate from summary snapshots", async () => {
+    const transport = new MockAgentHostTransport();
+    const detail = await transport.detail("demo:harbor-approval");
+
+    expect(detail.pendingApprovals[0]).toMatchObject({ command: "npm run verify:release" });
+    expect(transport.currentSnapshot.agents[1]).not.toHaveProperty("pendingApprovals");
+  });
+
   it("contain all representative statuses and capability combinations", () => {
     expect(new Set(demoAgents.map((agent) => agent.status))).toEqual(
       new Set(["unknown", "idle", "working", "blocked", "done", "error"]),

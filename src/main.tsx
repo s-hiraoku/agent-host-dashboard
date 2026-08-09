@@ -19,6 +19,21 @@ async function holdUntilAbort(signal: AbortSignal | undefined): Promise<void> {
   await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
 }
 
+async function delayUnlessAborted(milliseconds: number, signal: AbortSignal | undefined): Promise<boolean> {
+  if (signal?.aborted) return false;
+  return await new Promise<boolean>((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 if (fixtureMode === "incompatible") {
   transport.apiInfo = { apiVersion: "2", serverVersion: "demo-incompatible", features: [] };
 } else if (fixtureMode === "unauthorized") {
@@ -55,7 +70,7 @@ if (fixtureMode === "incompatible") {
   };
 } else if (fixtureMode === "delayed-update") {
   transport.events = async function* delayedUpdateEvents(options): AsyncIterable<AgentEvent> {
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    if (!(await delayUnlessAborted(1_000, options.signal))) return;
     const updated = { ...snapshot.agents[0]!, name: "Delayed live agent" };
     yield { type: "agent.upserted", revision: 41, agent: updated };
     await holdUntilAbort(options.signal);

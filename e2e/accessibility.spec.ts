@@ -32,4 +32,7 @@ test("uses non-color status text and honors reduced motion", async ({ page }) =>
   const durationMs = Number.parseFloat(animationDuration) * (animationDuration.endsWith("ms") ? 1 : 1_000);
   expect(durationMs).toBeLessThanOrEqual(0.01);
   await expectNoViolations(page);
+
+  await page.goto("/");
+  await expect(page.locator(".agent-row").first().locator(".status-badge")).toContainText(/blocked|error|working|idle|done|unknown/);
 });

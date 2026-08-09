@@ -140,19 +140,19 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "revision", "agent"],
-          "properties": { "type": { "const": "agent.upserted" }, "revision": { "type": "integer" }, "agent": { "$ref": "#/$defs/summary" } }
+          "properties": { "type": { "const": "agent.upserted" }, "revision": { "type": "integer", "minimum": 0 }, "agent": { "$ref": "#/$defs/summary" } }
         },
         {
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "revision", "agentId"],
-          "properties": { "type": { "const": "agent.removed" }, "revision": { "type": "integer" }, "agentId": { "type": "string" } }
+          "properties": { "type": { "const": "agent.removed" }, "revision": { "type": "integer", "minimum": 0 }, "agentId": { "type": "string" } }
         },
         {
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "revision", "adapter"],
-          "properties": { "type": { "const": "adapter.health" }, "revision": { "type": "integer" }, "adapter": { "$ref": "#/$defs/health" } }
+          "properties": { "type": { "const": "adapter.health" }, "revision": { "type": "integer", "minimum": 0 }, "adapter": { "$ref": "#/$defs/health" } }
         },
         {
           "type": "object",
@@ -160,7 +160,7 @@
           "required": ["type", "revision", "agentId", "actionId", "ok"],
           "properties": {
             "type": { "const": "action.completed" },
-            "revision": { "type": "integer" },
+            "revision": { "type": "integer", "minimum": 0 },
             "agentId": { "type": "string" },
             "actionId": { "type": "string" },
             "ok": { "type": "boolean" }
@@ -170,7 +170,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "revision"],
-          "properties": { "type": { "const": "heartbeat" }, "revision": { "type": "integer" } }
+          "properties": { "type": { "const": "heartbeat" }, "revision": { "type": "integer", "minimum": 0 } }
         }
       ]
     }
