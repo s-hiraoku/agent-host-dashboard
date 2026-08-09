@@ -58,11 +58,49 @@ function joinUrl(baseUrl: string, path: string): string {
   return new URL(normalizedPath.slice(1), `${baseUrl.replace(/\/$/, "")}/`).toString();
 }
 
-function errorCode(status: number): "unauthorized" | "not_found" | "rate_limited" | "connection_failed" {
+function errorCode(status: number, apiCode?: string): "unauthorized" | "not_found" | "rate_limited" | "connection_failed" | "capability_unavailable" | "revision_gap" | "unknown" {
   if (status === 401 || status === 403) return "unauthorized";
+  if (apiCode === "capability_not_available") return "capability_unavailable";
+  if (apiCode === "stale_cursor") return "revision_gap";
   if (status === 404) return "not_found";
   if (status === 429) return "rate_limited";
-  return "connection_failed";
+  if (status >= 500) return "connection_failed";
+  return "unknown";
+}
+
+async function responseError(response: Response, fallback: string): Promise<AgentHostError> {
+  let apiCode: string | undefined;
+  let message = fallback;
+  let apiDetails: Readonly<Record<string, unknown>> | undefined;
+  const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType === "application/json") {
+    try {
+      const body: unknown = await response.json();
+      if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+        const error = (body as Record<string, unknown>).error;
+        if (error !== null && typeof error === "object" && !Array.isArray(error)) {
+          const fields = error as Record<string, unknown>;
+          if (typeof fields.code === "string") apiCode = fields.code;
+          if (typeof fields.message === "string" && fields.message.length > 0) message = fields.message;
+          if (fields.details !== null && typeof fields.details === "object" && !Array.isArray(fields.details)) {
+            apiDetails = fields.details as Readonly<Record<string, unknown>>;
+          }
+        }
+      }
+    } catch {
+      // Error bodies are optional diagnostics. Status classification remains authoritative.
+    }
+  }
+  const requestId = response.headers.get("x-request-id") ?? undefined;
+  const code = errorCode(response.status, apiCode);
+  return new AgentHostError(code, message, {
+    status: response.status,
+    retryable: code === "revision_gap" || response.status === 429 || response.status >= 500,
+    ...(requestId === undefined ? {} : { requestId }),
+    ...(apiCode === undefined && apiDetails === undefined ? {} : {
+      details: { ...(apiCode === undefined ? {} : { apiCode }), ...apiDetails },
+    }),
+  });
 }
 
 export class FetchHttpChannel implements HttpChannel {
@@ -107,12 +145,7 @@ export class FetchHttpChannel implements HttpChannel {
     }
 
     if (!response.ok) {
-      const requestId = response.headers.get("x-request-id") ?? undefined;
-      throw new AgentHostError(errorCode(response.status), `agent-host request failed with HTTP ${response.status}.`, {
-        status: response.status,
-        retryable: response.status === 429 || response.status >= 500,
-        ...(requestId === undefined ? {} : { requestId }),
-      });
+      throw await responseError(response, `agent-host request failed with HTTP ${response.status}.`);
     }
     let body: unknown;
     try {
@@ -142,12 +175,7 @@ export class FetchHttpChannel implements HttpChannel {
       });
     }
     if (!response.ok) {
-      const requestId = response.headers.get("x-request-id") ?? undefined;
-      throw new AgentHostError(errorCode(response.status), `Event stream failed with HTTP ${response.status}.`, {
-        status: response.status,
-        retryable: response.status === 429 || response.status >= 500,
-        ...(requestId === undefined ? {} : { requestId }),
-      });
+      throw await responseError(response, `Event stream failed with HTTP ${response.status}.`);
     }
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
     if (mediaType !== "text/event-stream") {

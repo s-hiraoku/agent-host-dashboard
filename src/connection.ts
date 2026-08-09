@@ -139,27 +139,30 @@ async function runConnection(
     while (!signal.aborted) {
       state(observer, "connected", attempt, revision);
       try {
-        let resynced = false;
+        let streamSequence: number | undefined;
         for await (const event of client.events({ afterRevision: revision, signal })) {
-          if (event.revision <= revision) continue;
-          if (event.revision !== revision + 1) {
+          const sequenced = event.sequence !== undefined;
+          if (event.sequence !== undefined && streamSequence !== undefined && event.sequence !== streamSequence + 1) {
+            throw new AgentHostError(
+              "revision_gap",
+              `Expected event sequence ${streamSequence + 1}, received ${event.sequence}; refreshing the snapshot.`,
+              { retryable: true, details: { expected: streamSequence + 1, received: event.sequence } },
+            );
+          }
+          streamSequence = event.sequence;
+          if (!sequenced && event.revision <= revision) continue;
+          const revisionGap = sequenced
+            ? event.revision < revision || event.revision > revision + 1
+            : event.revision !== revision + 1;
+          if (revisionGap) {
             const gap = new AgentHostError(
               "revision_gap",
-              `Expected revision ${revision + 1}, received ${event.revision}; refreshing the snapshot.`,
-              { retryable: true, details: { expected: revision + 1, received: event.revision } },
+              sequenced
+                ? `Expected snapshot revision ${revision} or ${revision + 1}, received ${event.revision}; refreshing the snapshot.`
+                : `Expected snapshot revision ${revision + 1}, received ${event.revision}; refreshing the snapshot.`,
+              { retryable: true, details: { current: revision, received: event.revision } },
             );
-            observer.onError?.(gap);
-            state(observer, "stale", attempt, revision, gap.message);
-            consecutiveResyncs += 1;
-            if (consecutiveResyncs > maxConsecutiveResyncs) {
-              state(observer, "disconnected", attempt, revision, "Repeated revision gaps prevented synchronization.");
-              return;
-            }
-            snapshot = await client.snapshot({}, { signal });
-            revision = snapshot.revision;
-            observer.onSnapshot(snapshot);
-            resynced = true;
-            break;
+            throw gap;
           }
           consecutiveResyncs = 0;
           attempt = 0;
@@ -167,7 +170,6 @@ async function runConnection(
           observer.onEvent(event);
         }
         if (signal.aborted) break;
-        if (resynced) continue;
         throw new AgentHostError("connection_failed", "The event stream ended.", { retryable: true });
       } catch (error) {
         if (signal.aborted) break;
@@ -182,17 +184,58 @@ async function runConnection(
           state(observer, "incompatible", attempt, revision, failure.message);
           return;
         }
-        observer.onError?.(failure);
         if (!failure.retryable) {
+          observer.onError?.(failure);
           state(observer, "disconnected", attempt, revision, failure.message);
           return;
         }
-        attempt += 1;
-        state(observer, "reconnecting", attempt, revision, failure.message);
-        await scheduler.sleep(
-          backoff(attempt, initialBackoffMs, maxBackoffMs, jitterRatio, scheduler.random()),
-          signal,
-        );
+        observer.onError?.(failure);
+        if (failure.code === "revision_gap") {
+          consecutiveResyncs += 1;
+          state(observer, "stale", attempt, revision, failure.message);
+          if (consecutiveResyncs > maxConsecutiveResyncs) {
+            state(observer, "disconnected", attempt, revision, "Repeated revision gaps prevented synchronization.");
+            return;
+          }
+        } else {
+          attempt += 1;
+          state(observer, "reconnecting", attempt, revision, failure.message);
+          await scheduler.sleep(
+            backoff(attempt, initialBackoffMs, maxBackoffMs, jitterRatio, scheduler.random()),
+            signal,
+          );
+        }
+
+        while (!signal.aborted) {
+          try {
+            snapshot = await client.snapshot({}, { signal });
+            revision = snapshot.revision;
+            observer.onSnapshot(snapshot);
+            break;
+          } catch (snapshotError) {
+            if (signal.aborted) return;
+            const snapshotFailure = toAgentHostError(snapshotError);
+            observer.onError?.(snapshotFailure);
+            if (snapshotFailure.code === "unauthorized") {
+              state(observer, "unauthorized", attempt, revision, snapshotFailure.message);
+              return;
+            }
+            if (snapshotFailure.code === "incompatible_version") {
+              state(observer, "incompatible", attempt, revision, snapshotFailure.message);
+              return;
+            }
+            if (!snapshotFailure.retryable) {
+              state(observer, "disconnected", attempt, revision, snapshotFailure.message);
+              return;
+            }
+            attempt += 1;
+            state(observer, "reconnecting", attempt, revision, snapshotFailure.message);
+            await scheduler.sleep(
+              backoff(attempt, initialBackoffMs, maxBackoffMs, jitterRatio, scheduler.random()),
+              signal,
+            );
+          }
+        }
       }
     }
   } catch (error) {

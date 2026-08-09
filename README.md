@@ -24,11 +24,11 @@ agent-host
 
 Agent-host API v1 now publishes version discovery, bounded snapshots, adapter
 health, structured errors, bearer authentication, idempotent actions, sequenced
-SSE events, and sanitized client-conformance fixtures. The dashboard's production
-codec is still intentionally absent from the current build: v1 has fixed server ordering
-and no global provider/status facets, while the operational UI requires explicit
-global sorting and accurate summaries. Page-local approximations would be
-misleading.
+SSE events, and sanitized client-conformance fixtures. The dashboard production
+codec implements those confirmed v1 fields. API v1 still has fixed server
+ordering and no global provider/status facets, so the UI disables alternate sorts
+and renders unavailable global counts as dashes instead of presenting page-local
+approximations as operational truth.
 
 The client therefore ships:
 
@@ -39,10 +39,10 @@ The client therefore ships:
 - connection lifecycle, reconnect/backoff, revision-gap detection, and snapshot resync behavior.
 
 Supported API versions are explicitly supplied when constructing
-`DefaultAgentHostClient`; an unknown version fails closed. The next connector PR
-will implement the confirmed v1 subset, including separate SSE sequence and
-snapshot-revision tracking and mandatory resync after continuity loss. Unsupported
-sort/facet behavior will remain unavailable rather than being guessed. See
+`DefaultAgentHostClient`; an unknown version fails closed. The v1 codec keeps SSE
+sequence and snapshot revision separate and performs mandatory snapshot resync
+after ready mismatch, sequence gap, clean EOF, or network disconnect. Unsupported
+sort/facet behavior remains unavailable rather than being guessed. See
 [docs/agent-host-contract-blockers.md](docs/agent-host-contract-blockers.md).
 
 ## Authentication and local connection
@@ -69,8 +69,9 @@ npm run check
 ```
 
 The development server starts with connection onboarding in an explicitly
-labelled fixture-only simulation mode. Production builds fail closed until the
-v1 codec and its remaining query capabilities are integrated. The deterministic
+labelled fixture-only simulation mode. Add `?connector=real` to exercise the
+public v1 connector against a running host; production builds use that connector
+by default. The deterministic
 evaluation workspace remains available at `/?fixture=live`; its **Demo state**
 control reproduces live, blocked, error, disconnected, stale, unauthorized, and
 incompatible states without a running host. The UI paginates the 1,000-agent
@@ -90,10 +91,10 @@ AGENT_HOST_URL=http://127.0.0.1:9417 npm run dev
 
 The confirmed backend authentication contract requires a bearer token. A
 development-only proxy can receive it from `AGENT_HOST_TOKEN`; it is never
-compiled into browser assets or written to browser storage. The checked-in UI
-does not call this proxy yet: development onboarding uses labelled fixtures and
-the production entry fails closed until the v1 `AgentHostWireProtocol`
-implementation and its conformance tests land.
+compiled into browser assets or written to browser storage. The real onboarding
+flow also accepts the token at runtime and keeps it only in the active in-memory
+lease. Direct browser connections require the dashboard origin in
+`AGENT_HOST_ALLOWED_ORIGINS`; same-origin proxy connections use `/agent-host`.
 
 ## Dashboard interaction model
 

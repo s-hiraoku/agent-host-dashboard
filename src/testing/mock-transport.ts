@@ -14,7 +14,7 @@ import type { AgentHostTransport, EventStreamOptions, RequestOptions } from "../
 import { createDemoSnapshot, demoAdapterHealth, demoAgents } from "./fixtures.js";
 
 export class MockAgentHostTransport implements AgentHostTransport {
-  apiInfo: ApiInfo = { apiVersion: "1", serverVersion: "demo", features: ["events-after-revision"] };
+  apiInfo: ApiInfo = { apiVersion: "1", serverVersion: "demo", features: ["events-after-revision", "facets", "sort"] };
   currentSnapshot: AgentSnapshot = createDemoSnapshot();
   readonly details = new Map<string, AgentDetail>(demoAgents.map((agent) => [agent.id, agent]));
   snapshots: AgentSnapshot[] = [];
@@ -122,7 +122,11 @@ export class MockAgentHostTransport implements AgentHostTransport {
       if (stream instanceof AgentHostError) throw stream;
       for (const event of stream) {
         if (options.signal?.aborted) throw options.signal.reason;
-        if (event.revision > options.afterRevision) yield event;
+        const isAfterCursor =
+          event.sequence === undefined
+            ? event.revision > options.afterRevision
+            : event.revision >= options.afterRevision;
+        if (isAfterCursor) yield event;
       }
       if (this.holdEventStreams && options.signal) {
         await new Promise<void>((resolve) => {

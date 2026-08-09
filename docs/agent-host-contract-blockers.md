@@ -44,6 +44,13 @@ requests is non-atomic and scales with the number of providers. The API needs
 revision-consistent facet counts with defined pre-filter/post-filter semantics,
 or an explicit capability that lets the UI mark global summaries unavailable.
 
+### File approval context
+
+The public pending-approval record includes method, reason, and command, but no
+sanitized file path or file-change summary. The dashboard can safely label
+command approvals and can operate an opaque semantic approval ID, but it cannot
+show the required file context before approving or rejecting a file change.
+
 ### Stable public project scope
 
 The v1 summary has provider and source but no classified, stable public project
@@ -53,9 +60,7 @@ future compatible contract.
 
 ## Completion rule
 
-The next connector PR must run the official agent-host fixtures through the real
-HTTP/SSE codec and cover ready mismatch, repeated snapshot revisions, sequence
-gaps, disconnect resync, unauthorized/incompatible responses, stale cursors,
-action idempotency, timeout, and abort behavior. Dashboard #1-#4 and the
-agent-host #11 dashboard gate cannot be reported complete until that connector
-is integrated and global sort/facet behavior is resolved without approximation.
+The connector runs pinned official fixtures through the real codec and has a live
+public HTTP/SSE demo-host gate. Dashboard #1-#4 and the agent-host #11 dashboard
+gate still cannot be reported complete until global sort/facet behavior and file
+approval context are resolved without approximation.

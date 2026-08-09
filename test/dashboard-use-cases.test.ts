@@ -41,6 +41,28 @@ describe("dashboard use cases", () => {
     expect(updated.revision).toBe(41);
   });
 
+  it("applies distinct sequenced events that share one snapshot revision", () => {
+    const snapshot = createLargeDemoSnapshot(10, 40);
+    const first = snapshot.agents[0]!;
+    const second = snapshot.agents[1]!;
+    const afterFirst = applyVisibleEvent(snapshot, {
+      type: "agent.upserted",
+      revision: 41,
+      sequence: 8,
+      agent: { ...first, name: "First update" },
+    });
+    const afterSecond = applyVisibleEvent(afterFirst, {
+      type: "agent.upserted",
+      revision: 41,
+      sequence: 9,
+      agent: { ...second, name: "Second update" },
+    });
+
+    expect(afterSecond.agents[0]?.name).toBe("First update");
+    expect(afterSecond.agents[1]?.name).toBe("Second update");
+    expect(afterSecond.eventSequence).toBe(9);
+  });
+
   it("removes a visible row that no longer belongs to the active filter", () => {
     const snapshot = createLargeDemoSnapshot(10);
     const target = snapshot.agents[0]!;
@@ -70,6 +92,20 @@ describe("dashboard use cases", () => {
     expect(reconciled.total).toBe(9);
     expect(reconciled.facets?.byStatus.working).toBe(9);
     expect(reconciled.facets?.byProvider["demo-alpha"]).toBe(9);
+  });
+
+  it("replays sequenced events from the same revision over an in-flight snapshot", () => {
+    const snapshot = createLargeDemoSnapshot(10, 41);
+    const first = snapshot.agents[0]!;
+    const second = snapshot.agents[1]!;
+    const reconciled = reconcileVisibleEvents(snapshot, [
+      { type: "agent.upserted", revision: 41, sequence: 12, agent: { ...second, name: "Second update" } },
+      { type: "agent.upserted", revision: 41, sequence: 11, agent: { ...first, name: "First update" } },
+    ]);
+
+    expect(reconciled.agents[0]?.name).toBe("First update");
+    expect(reconciled.agents[1]?.name).toBe("Second update");
+    expect(reconciled.eventSequence).toBe(12);
   });
 
   it("invalidates aggregate facets when an off-page event cannot be reconciled safely", () => {

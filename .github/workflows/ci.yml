@@ -42,8 +42,47 @@ jobs:
       - run: npm ci
       - run: npm run test:contract
 
+  live-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: s-hiraoku/agent-host
+          ref: 9344c8287331a34a88f640cd17e9d82c280bbf45
+          path: agent-host
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify the public v1 HTTP/SSE adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(openssl rand -hex 24)"
+          pushd agent-host >/dev/null
+          env AGENT_HOST_API_TOKEN="$token" AGENT_HOST_PORT=48777 AGENT_HOST_REFRESH_MS=60000 npm run demo >"$RUNNER_TEMP/agent-host-demo.log" 2>&1 &
+          host_pid=$!
+          popd >/dev/null
+          cleanup() {
+            kill "$host_pid" 2>/dev/null || true
+            wait "$host_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          if ! env AGENT_HOST_BASE_URL=http://127.0.0.1:48777 AGENT_HOST_API_TOKEN="$token" npm run test:conformance:live; then
+            cat "$RUNNER_TEMP/agent-host-demo.log"
+            exit 1
+          fi
+        env:
+          NODE_ENV: test
+
   browser-e2e:
-    needs: [build-unit, contract]
+    needs: [build-unit, contract, live-conformance]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -68,7 +107,7 @@ jobs:
           retention-days: 7
 
   accessibility:
-    needs: [build-unit, contract]
+    needs: [build-unit, contract, live-conformance]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -93,7 +132,7 @@ jobs:
           retention-days: 7
 
   performance:
-    needs: [build-unit, contract]
+    needs: [build-unit, contract, live-conformance]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

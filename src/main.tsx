@@ -7,6 +7,9 @@ import { LocalPreferenceStore } from "./daily/preferences.js";
 import { assertOpenSession, type ClientConnector } from "./daily/session.js";
 import type { AgentEvent } from "./domain.js";
 import { AgentHostError } from "./errors.js";
+import { FetchHttpChannel } from "./http/fetch-channel.js";
+import { HttpAgentHostTransport } from "./http/protocol.js";
+import { AgentHostV1Protocol } from "./http/v1-protocol.js";
 import { createLargeDemoSnapshot, demoAdapterHealth } from "./testing/fixtures.js";
 import { MockAgentHostTransport } from "./testing/mock-transport.js";
 import "./styles.css";
@@ -127,25 +130,35 @@ const demoConnector: ClientConnector = {
   },
 };
 
-const blockedConnector: ClientConnector = {
-  async open() {
-    throw new AgentHostError(
-      "unsupported",
-      "This build does not include an agent-host HTTP/SSE adapter because the versioned public wire contract is not yet confirmed.",
+const productionConnector: ClientConnector = {
+  async open(input, signal) {
+    assertOpenSession(signal);
+    const channel = new FetchHttpChannel({
+      baseUrl: input.baseUrl,
+      authentication: () => {
+        const token = input.credential();
+        return token ? { scheme: "Bearer", token } : undefined;
+      },
+    });
+    const client = new DefaultAgentHostClient(
+      new HttpAgentHostTransport(channel, new AgentHostV1Protocol()),
+      { supportedApiVersions: ["1"] },
     );
+    return { client, close() {} };
   },
 };
 
 const simulationNotice = "Simulation mode · sanitized fixtures only. No request is sent to the endpoint.";
-const unavailableConnectorNotice = "Public HTTP/SSE connector unavailable · this build fails closed until the versioned agent-host wire contract is confirmed.";
+const realConnector = !import.meta.env.DEV || parameters.get("connector") === "real";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root element.");
 const app = fixtureMode === "onboarding"
   ? <DailyDriverShell
-      connector={import.meta.env.DEV ? demoConnector : blockedConnector}
+      connector={realConnector ? productionConnector : demoConnector}
       preferenceStore={new LocalPreferenceStore()}
-      environmentNotice={import.meta.env.DEV ? simulationNotice : unavailableConnectorNotice}
+      credentialRequired={realConnector}
+      {...(realConnector ? {} : { environmentNotice: simulationNotice })}
     />
   : <App client={createFixtureClient(fixtureMode)} now={() => Date.parse("2026-01-15T09:31:00.000Z")} />;
 createRoot(root).render(fixtureMode === "live" || fixtureMode === "onboarding" ? <StrictMode>{app}</StrictMode> : app);

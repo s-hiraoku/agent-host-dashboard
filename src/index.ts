@@ -5,6 +5,7 @@ export * from "./errors.js";
 export * from "./transport.js";
 export * from "./http/fetch-channel.js";
 export * from "./http/protocol.js";
+export * from "./http/v1-protocol.js";
 export * from "./http/sse.js";
 export * from "./http/types.js";
 export * from "./testing/fixtures.js";

@@ -18,6 +18,7 @@ import { toAgentHostError } from "../errors.js";
 import { appendBoundedEvent, applyVisibleEvent, reconcileVisibleEvents, replayableEvents, type BoundedEventBuffer } from "./use-cases.js";
 
 const pageSize = 50;
+const fixedAttentionSort: AgentSort = { field: "status", direction: "asc" };
 
 export interface DashboardQuery {
   readonly text: string;
@@ -67,7 +68,7 @@ export interface DashboardOptions {
   readonly onQueryChange?: (query: DashboardQuery) => void;
 }
 
-function requestFor(query: DashboardQuery, cursor: string | undefined): AgentPageRequest {
+function requestFor(query: DashboardQuery, cursor: string | undefined, apiInfo: ApiInfo): AgentPageRequest {
   return {
     limit: pageSize,
     ...(cursor === undefined ? {} : { cursor }),
@@ -76,7 +77,7 @@ function requestFor(query: DashboardQuery, cursor: string | undefined): AgentPag
       ...(query.status === "all" ? {} : { statuses: [query.status] }),
       ...(query.provider ? { providers: [query.provider] } : {}),
     },
-    sort: query.sort,
+    ...(apiInfo.features.includes("sort") ? { sort: query.sort } : {}),
   };
 }
 
@@ -102,19 +103,22 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
     text: "",
     status: "all",
     provider: "",
-    sort: { field: "status", direction: "asc" },
+    sort: fixedAttentionSort,
   });
   const [cursors, setCursors] = useState<readonly (string | undefined)[]>([undefined]);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<string>();
-  const [operationError, setOperationError] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
+  const [detailError, setDetailError] = useState<string>();
   const [actionResult, setActionResult] = useState<AgentActionResult>();
   const [actionHistory, setActionHistory] = useState<readonly DashboardActionRecord[]>([]);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [detailGeneration, setDetailGeneration] = useState(0);
   const actionSequence = useRef(0);
   const queryRef = useRef(query);
+  const onQueryChangeRef = useRef(options.onQueryChange);
+  onQueryChangeRef.current = options.onQueryChange;
   const cursorRef = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
   const detailRequestGeneration = useRef(0);
@@ -138,10 +142,20 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
     requestController.current = controller;
     setLoading(true);
     try {
+      const nextApiInfo = await client.discover({ signal: controller.signal });
+      let effectiveQuery = queryRef.current;
+      if (!nextApiInfo.features.includes("sort") && (
+        effectiveQuery.sort.field !== fixedAttentionSort.field
+        || effectiveQuery.sort.direction !== fixedAttentionSort.direction
+      )) {
+        effectiveQuery = { ...effectiveQuery, sort: fixedAttentionSort };
+        queryRef.current = effectiveQuery;
+        setQueryState(effectiveQuery);
+        onQueryChangeRef.current?.(effectiveQuery);
+      }
       const replayAfterOrdinal = eventOrdinal.current;
-      const [nextApiInfo, nextSnapshot, nextHealth] = await Promise.all([
-        client.discover({ signal: controller.signal }),
-        client.snapshot(requestFor(queryRef.current, cursorRef.current), { signal: controller.signal }),
+      const [nextSnapshot, nextHealth] = await Promise.all([
+        client.snapshot(requestFor(effectiveQuery, cursorRef.current, nextApiInfo), { signal: controller.signal }),
         client.adapterHealth({ signal: controller.signal }),
       ]);
       if (generation !== requestGeneration.current) return;
@@ -156,7 +170,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       snapshotReady.current = true;
       setApiInfo(nextApiInfo);
       setHealth(nextHealth);
-      setOperationError(undefined);
+      setLoadError(undefined);
       setSelectedId((current) => {
         const next = current ?? reconciledSnapshot.agents[0]?.id;
         selectedIdRef.current = next;
@@ -164,7 +178,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       });
     } catch (failure) {
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      setOperationError(toAgentHostError(failure).message);
+      setLoadError(toAgentHostError(failure).message);
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
@@ -272,6 +286,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   useEffect(() => {
     if (!selectedId) {
       setDetail(undefined);
+      setDetailError(undefined);
       return;
     }
     const controller = new AbortController();
@@ -282,11 +297,11 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       .then((value) => {
         if (controller.signal.aborted || generation !== detailRequestGeneration.current) return;
         setDetail(value);
-        setOperationError(undefined);
+        setDetailError(undefined);
       })
       .catch((failure: unknown) => {
         if (!controller.signal.aborted && generation === detailRequestGeneration.current) {
-          setOperationError(toAgentHostError(failure).message);
+          setDetailError(toAgentHostError(failure).message);
         }
       });
     return () => {
@@ -297,20 +312,21 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
 
   const select = useCallback((agentId: string) => {
     selectedIdRef.current = agentId;
+    setDetailError(undefined);
     setSelectedId(agentId);
   }, []);
 
   const setQuery = useCallback(
     (nextQuery: DashboardQuery) => {
       queryRef.current = nextQuery;
-      options.onQueryChange?.(nextQuery);
+      onQueryChangeRef.current?.(nextQuery);
       cursorRef.current = undefined;
       setQueryState(nextQuery);
       setCursors([undefined]);
       setPage(0);
       void load();
     },
-    [load, options.onQueryChange],
+    [load],
   );
 
   const nextPage = useCallback(() => {
@@ -370,7 +386,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       hasPrevious: page > 0,
       hasNext: Boolean(snapshot?.nextCursor),
       loading,
-      error: operationError ?? connectionError,
+      error: detailError ?? loadError ?? connectionError,
       actionResult,
       actionHistory,
       setQuery,
@@ -395,7 +411,8 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       loading,
       nextPage,
       notificationEvents,
-      operationError,
+      detailError,
+      loadError,
       page,
       perform,
       previousPage,

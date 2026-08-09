@@ -292,7 +292,7 @@ describe("daily-driver shell", () => {
 
     expect(await screen.findByRole("heading", { name: "Connection could not be opened" })).toBeInTheDocument();
     expect(connector.open).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Agent-host endpoint")).toHaveValue("http://127.0.0.1:8787/");
+    expect(screen.getByLabelText("Agent-host endpoint")).toHaveValue("http://127.0.0.1:4777/");
     expect(storage.values.get(preferenceStorageKey) ?? "").not.toContain(secret);
     expect(view.container.innerHTML).not.toContain(secret);
   });

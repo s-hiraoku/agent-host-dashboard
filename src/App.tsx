@@ -216,8 +216,9 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
         <section className="approval-card" key={approval.id} aria-labelledby={`approval-${approval.id}`}>
           <div className="approval-title"><ShieldAlert aria-hidden="true" /><h3 id={`approval-${approval.id}`}>Pending approval</h3></div>
           <ApprovalContext approval={approval} />
+          {approval.kind === "other" && <p className="keyboard-warning" role="alert">Approve and reject are disabled because the host did not expose command or file context for this request.</p>}
           <div className="approval-actions">
-            {detail.capabilities.reject && (
+            {approval.kind !== "other" && detail.capabilities.reject && (
               <button type="button" className="reject-button" disabled={busy} onClick={() => setPending({
                 title: "Reject this request?",
                 label: "Reject request",
@@ -227,7 +228,7 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
                 body: <ApprovalContext approval={approval} />,
               })}><X aria-hidden="true" />Reject</button>
             )}
-            {detail.capabilities.approve && (
+            {approval.kind !== "other" && detail.capabilities.approve && (
               <button type="button" className="approve-button" disabled={busy} onClick={() => setPending({
                 title: "Approve this exact request?",
                 label: "Approve request",
@@ -428,6 +429,9 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
   const previousSurface = useRef(surface);
   const displayConnection = scenarioStates[scenario] ?? model.connection;
   const displayError = model.error === displayConnection.reason ? undefined : model.error;
+  const globalFacetsUnavailable = model.snapshot !== undefined
+    && model.snapshot.facets === undefined
+    && model.snapshot.total !== model.snapshot.agents.length;
   const metrics = statusMetrics(model.snapshot);
   const providers = providerMetrics(model.snapshot);
   const currentTime = now();
@@ -580,7 +584,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
         <div className="total-metric"><p className="eyebrow" id="summary-heading">Current scope</p><strong>{model.snapshot?.total?.toLocaleString() ?? "—"}</strong><span>agents</span></div>
         {metrics.map((metric) => (
           <button key={metric.status} type="button" className={`summary-metric ${metric.urgent ? "urgent" : ""}`} onClick={() => model.setQuery(updateQuery(model.query, { status: metric.status }))}>
-            <StatusBadge status={metric.status} /><strong>{metric.count.toLocaleString()}</strong>
+            <StatusBadge status={metric.status} /><strong>{metric.count?.toLocaleString() ?? "—"}</strong>
           </button>
         ))}
         <div className="adapter-summary"><HeartPulse aria-hidden="true" /><div><strong>{model.health.filter((item) => item.status === "healthy").length}/{model.health.length}</strong><span>adapters healthy</span></div></div>
@@ -596,17 +600,19 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
               <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{metric.status}</option>)}</select></label>
               <label><span>Provider</span><select value={model.query.provider} onChange={(event) => model.setQuery(updateQuery(model.query, { provider: event.target.value }))}><option value="">All</option>{providers.map(([provider]) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
             </div>
-            <div className="provider-breakdown" aria-label="Provider summary">
+            <div className="provider-breakdown" aria-label={globalFacetsUnavailable ? "Observed providers; global counts unavailable" : "Provider summary"}>
               {providers.slice(0, 4).map(([provider, count]) => (
                 <button key={provider} type="button" aria-pressed={model.query.provider === provider} onClick={() => model.setQuery(updateQuery(model.query, { provider: model.query.provider === provider ? "" : provider }))}>
-                  <span>{provider}</span><strong>{count}</strong>
+                  <span>{provider}</span><strong>{count ?? "—"}</strong>
                 </button>
               ))}
             </div>
-            <label className="sort-control"><span>Sort</span><select value={`${model.query.sort.field}:${model.query.sort.direction}`} onChange={(event) => {
+            <label className="sort-control"><span>Sort</span><select disabled={model.apiInfo !== undefined && !model.apiInfo.features.includes("sort")} title={model.apiInfo !== undefined && !model.apiInfo.features.includes("sort") ? "This host exposes fixed attention ordering." : undefined} value={`${model.query.sort.field}:${model.query.sort.direction}`} onChange={(event) => {
               const [field, direction] = event.target.value.split(":") as [DashboardQuery["sort"]["field"], DashboardQuery["sort"]["direction"]];
               model.setQuery(updateQuery(model.query, { sort: { field, direction } }));
             }}><option value="status:asc">Attention first</option><option value="lastActivityAt:desc">Last activity</option><option value="name:asc">Name A–Z</option><option value="provider:asc">Provider</option></select></label>
+            {globalFacetsUnavailable && <p className="hint" role="status">Global status and provider counts are unavailable from this host. Dashes are shown instead of page-local approximations.</p>}
+            {model.apiInfo !== undefined && !model.apiInfo.features.includes("sort") && <p className="hint">This host uses fixed attention ordering; alternate global sorts are disabled.</p>}
           </div>
           <div className="result-meta"><span>{model.loading ? "Updating…" : `${model.snapshot?.agents.length ?? 0} shown of ${model.snapshot?.total ?? 0}`}</span><span className="mono">rev {model.snapshot?.revision ?? "—"}</span></div>
           <ul className="agent-list">

@@ -88,6 +88,22 @@ describe("evaluation dashboard", () => {
     expect(screen.getByRole("button", { name: /Next/ })).toBeEnabled();
   });
 
+  it("does not present page-local sort or facet approximations as global capabilities", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.apiInfo = { apiVersion: "1", features: ["fixed-attention-order"] };
+    const snapshot = transport.snapshot.bind(transport);
+    transport.snapshot = async (request, options) => {
+      const { facets: _facets, ...withoutFacets } = await snapshot(request, options);
+      return withoutFacets;
+    };
+    const { container } = renderDashboard(transport);
+
+    expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();
+    expect(screen.getByLabelText("Sort")).toBeDisabled();
+    expect(screen.getByText(/Dashes are shown instead of page-local approximations/)).toBeInTheDocument();
+    expect([...container.querySelectorAll(".summary-metric strong")].every((node) => node.textContent === "—")).toBe(true);
+  });
+
   it("disables pagination while the next page is loading", async () => {
     const transport = new MockAgentHostTransport();
     const originalSnapshot = transport.snapshot.bind(transport);
@@ -136,6 +152,23 @@ describe("evaluation dashboard", () => {
     await waitFor(() => expect(transport.actions).toHaveLength(1));
     expect(transport.actions[0]?.action).toMatchObject({ kind: "approve" });
     expect(transport.actions[0]?.target.id).toBe("demo:agent-0002");
+  });
+
+  it("disables semantic approval when the host omits command and file context", async () => {
+    const transport = new MockAgentHostTransport();
+    const detail = transport.detail.bind(transport);
+    transport.detail = async (agentId, options) => ({
+      ...await detail(agentId, options),
+      pendingApprovals: [{ id: "opaque-approval", kind: "other", summary: "Approval request" }],
+    });
+    const { user } = renderDashboard(transport);
+
+    await user.selectOptions(screen.getByLabelText("Status"), "blocked");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent/ }))[0]!);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/host did not expose command or file context/);
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });
 
   it("restores focus after cancellation and suppresses duplicate actions", async () => {
@@ -551,7 +584,7 @@ describe("evaluation dashboard", () => {
     await user.click(screen.getByRole("button", { name: "Diagnostics" }));
     expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("Sanitized diagnostics only")).toBeInTheDocument();
-    expect(screen.getByText("events-after-revision")).toBeInTheDocument();
+    expect(screen.getByText(/events-after-revision/)).toBeInTheDocument();
   });
 
   it("keeps observed notification scopes and mute choices stable across filtering", async () => {
