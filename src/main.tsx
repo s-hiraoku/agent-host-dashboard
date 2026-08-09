@@ -80,6 +80,13 @@ function createFixtureClient(mode: string): DefaultAgentHostClient {
       yield { type: "agent.upserted", revision: 41, agent: updated };
       await holdUntilAbort(options.signal);
     };
+  } else if (mode === "attention") {
+    transport.events = async function* attentionEvents(options): AsyncIterable<AgentEvent> {
+      if (!(await delayUnlessAborted(2_000, options.signal))) return;
+      const updated = { ...snapshot.agents[0]!, status: "blocked" as const };
+      yield { type: "agent.upserted", revision: 41, agent: updated };
+      await holdUntilAbort(options.signal);
+    };
   } else {
     transport.eventStreams = [[
       { type: "heartbeat", revision: 41 },
@@ -106,7 +113,7 @@ const demoConnector: ClientConnector = {
     if (connectionAttempt === 1 && plannedFailure === "unavailable") {
       throw new AgentHostError("connection_failed", "No agent-host responded at the loopback endpoint.", { retryable: true });
     }
-    return { client: createFixtureClient("live"), close() {} };
+    return { client: createFixtureClient(parameters.get("stream") ?? "live"), close() {} };
   },
 };
 

@@ -26,10 +26,10 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const [connecting, setConnecting] = useState(false);
   const [failure, setFailure] = useState<{ readonly kind: SessionFailure; readonly message: string }>();
   const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
+  const [activeNotificationCoordinator, setActiveNotificationCoordinator] = useState<NotificationCoordinator | undefined>(() => notificationCoordinator);
   const formRef = useRef<HTMLFormElement>(null);
   const activeCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
   const notifications = useRef(notificationGateway ?? new BrowserNotificationGateway());
-  const notificationOwnership = useRef(notificationCoordinator ?? new BrowserNotificationCoordinator());
   const leaseRef = useRef<ClientLease | undefined>(undefined);
   const activeEndpoint = useRef<string | undefined>(undefined);
   const attempt = useRef<{ readonly generation: number; readonly controller: AbortController; readonly vault?: MemoryCredentialVault }>({ generation: 0, controller: new AbortController() });
@@ -43,8 +43,17 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     attempt.current.vault?.clear();
     leaseRef.current?.close();
     activeCredentialVault.current?.clear();
-    notificationOwnership.current.close();
   }, []);
+
+  useEffect(() => {
+    if (notificationCoordinator) {
+      setActiveNotificationCoordinator(notificationCoordinator);
+      return;
+    }
+    const coordinator = new BrowserNotificationCoordinator();
+    setActiveNotificationCoordinator(coordinator);
+    return () => coordinator.close();
+  }, [notificationCoordinator]);
 
   const updatePreferences = (update: DashboardPreferences | ((current: DashboardPreferences) => DashboardPreferences)) => {
     setPreferences((current) => {
@@ -158,7 +167,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
+      {lease && activeNotificationCoordinator && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,
@@ -169,7 +178,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
         },
         ...(environmentNotice ? { environmentNotice } : {}),
         notificationGateway: notifications.current,
-        notificationCoordinator: notificationOwnership.current,
+        notificationCoordinator: activeNotificationCoordinator,
       }} /></div>}
       {showOnboarding && <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">

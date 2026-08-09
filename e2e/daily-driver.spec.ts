@@ -131,3 +131,44 @@ test("provides session activity, diagnostics, scoped notifications, and search s
   await page.getByText(/Provider and project controls/).click();
   await expect(page.getByRole("group", { name: "Providers" }).locator('input[type="checkbox"]').first()).toBeChecked();
 });
+
+test("delivers one private notification and revalidates its agent on click", async ({ page }) => {
+  await page.addInitScript(() => {
+    const shown: Array<{ title: string; options?: NotificationOptions; onclick?: () => void }> = [];
+    Object.defineProperty(window, "__dashboardNotifications", { value: shown });
+    class TestNotification {
+      static permission: NotificationPermission = "default";
+      static async requestPermission(): Promise<NotificationPermission> {
+        TestNotification.permission = "granted";
+        return "granted";
+      }
+      onclick: (() => void) | null = null;
+      constructor(readonly title: string, readonly options?: NotificationOptions) {
+        shown.push(this);
+      }
+      close(): void {}
+    }
+    Object.defineProperty(window, "Notification", { configurable: true, value: TestNotification });
+  });
+
+  await page.goto("/?stream=attention");
+  await connect(page);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Enable desktop notifications" }).click();
+  await expect(page.getByText("Browser permission:")).toContainText("granted");
+
+  await expect.poll(async () => page.evaluate(() => (window as typeof window & { __dashboardNotifications: unknown[] }).__dashboardNotifications.length)).toBe(1);
+  const delivered = await page.evaluate(() => {
+    const notification = (window as typeof window & { __dashboardNotifications: Array<{ title: string; options?: NotificationOptions }> }).__dashboardNotifications[0]!;
+    return { title: notification.title, body: notification.options?.body, tag: notification.options?.tag };
+  });
+  expect(delivered).toEqual({ title: "Sanitized agent 0001 is blocked", body: "demo-alpha · project-0", tag: "41:blocked" });
+  expect(JSON.stringify(delivered)).not.toMatch(/demo:agent|\/workspace|prompt|command|approval/i);
+
+  await page.evaluate(() => {
+    const notification = (window as typeof window & { __dashboardNotifications: Array<{ onclick?: () => void }> }).__dashboardNotifications[0];
+    notification?.onclick?.();
+  });
+  await expect(page.locator(".workspace")).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Sanitized agent 0001" })).toBeVisible();
+});

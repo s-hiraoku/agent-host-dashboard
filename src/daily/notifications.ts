@@ -66,6 +66,7 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
   private readonly peers = new Set<string>();
   private readonly delivered = new Set<string>();
   private readonly channel: NotificationChannel | undefined;
+  private closed = false;
 
   constructor(options: { readonly tabId?: string; readonly channel?: NotificationChannel; readonly settleMs?: number } = {}) {
     this.tabId = options.tabId ?? crypto.randomUUID();
@@ -94,6 +95,7 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, this.settleMs));
+    if (this.closed) return;
     if (this.delivered.has(key)) return;
     const owner = [...this.peers, this.tabId].sort()[0];
     if (owner !== this.tabId) return;
@@ -103,6 +105,8 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.channel?.postMessage({ type: "bye", tabId: this.tabId } satisfies CoordinationMessage);
     if (this.channel) this.channel.onmessage = null;
     this.channel?.close();

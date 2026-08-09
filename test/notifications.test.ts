@@ -51,4 +51,23 @@ describe("daily-driver notifications", () => {
     left.close();
     right.close();
   });
+
+  it("cancels a pending delivery when its coordinator closes", async () => {
+    class ClosingChannel {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      closed = false;
+      postMessage(_message: unknown) {
+        if (this.closed) throw new DOMException("Channel is closed", "InvalidStateError");
+      }
+      close() { this.closed = true; }
+    }
+    const channel = new ClosingChannel();
+    const coordinator = new BrowserNotificationCoordinator({ tabId: "strict-mode", channel, settleMs: 1 });
+    let deliveries = 0;
+    const pending = coordinator.runOnce("41:blocked", () => { deliveries += 1; });
+
+    coordinator.close();
+    await expect(pending).resolves.toBeUndefined();
+    expect(deliveries).toBe(0);
+  });
 });
