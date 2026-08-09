@@ -117,11 +117,15 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const queryRef = useRef(query);
   const cursorRef = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
+  const detailRequestGeneration = useRef(0);
   const requestController = useRef<AbortController | undefined>(undefined);
   const eventBuffer = useRef<readonly AgentEvent[]>([]);
   const visibleAgentIds = useRef(new Set<string>());
   const selectedIdRef = useRef<string | undefined>(undefined);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reloadInFlight = useRef(false);
+  const reloadDirty = useRef(false);
+  const reloadEpoch = useRef(0);
   const knownStatuses = useRef(new Map<string, AgentStatus>());
   const snapshotReady = useRef(false);
 
@@ -167,14 +171,27 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   useEffect(() => () => {
     requestController.current?.abort();
     if (reloadTimer.current !== undefined) clearTimeout(reloadTimer.current);
+    reloadEpoch.current += 1;
   }, []);
 
   const scheduleReload = useCallback(() => {
-    if (reloadTimer.current !== undefined) return;
-    reloadTimer.current = setTimeout(() => {
-      reloadTimer.current = undefined;
-      void load();
-    }, 0);
+    reloadDirty.current = true;
+    if (reloadTimer.current !== undefined || reloadInFlight.current) return;
+    const epoch = reloadEpoch.current;
+    const drain = () => {
+      reloadTimer.current = setTimeout(() => {
+        reloadTimer.current = undefined;
+        if (epoch !== reloadEpoch.current || !reloadDirty.current) return;
+        reloadDirty.current = false;
+        reloadInFlight.current = true;
+        void load().finally(() => {
+          if (epoch !== reloadEpoch.current) return;
+          reloadInFlight.current = false;
+          if (reloadDirty.current) drain();
+        });
+      }, 250);
+    };
+    drain();
   }, [load]);
 
   useEffect(() => {
@@ -212,7 +229,11 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
           if (!visibleAgentIds.current.has(event.agentId)) scheduleReload();
           knownStatuses.current.delete(event.agentId);
           visibleAgentIds.current.delete(event.agentId);
-          if (event.agentId === selectedIdRef.current) setDetailGeneration((current) => current + 1);
+          if (event.agentId === selectedIdRef.current) {
+            selectedIdRef.current = undefined;
+            setSelectedId(undefined);
+            setDetail(undefined);
+          }
         } else if (event.type === "action.completed" && event.agentId === selectedIdRef.current) {
           setDetailGeneration((current) => current + 1);
         }
@@ -231,6 +252,15 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
     });
     return () => {
       active = false;
+      reloadEpoch.current += 1;
+      reloadDirty.current = false;
+      reloadInFlight.current = false;
+      if (reloadTimer.current !== undefined) {
+        clearTimeout(reloadTimer.current);
+        reloadTimer.current = undefined;
+      }
+      requestGeneration.current += 1;
+      requestController.current?.abort();
       hostConnection.close();
     };
   }, [client, connectionGeneration, load, scheduleReload]);
@@ -241,16 +271,24 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       return;
     }
     const controller = new AbortController();
+    const generation = detailRequestGeneration.current + 1;
+    detailRequestGeneration.current = generation;
     void client
       .detail(selectedId, { signal: controller.signal })
       .then((value) => {
+        if (controller.signal.aborted || generation !== detailRequestGeneration.current) return;
         setDetail(value);
         setOperationError(undefined);
       })
       .catch((failure: unknown) => {
-        if (!controller.signal.aborted) setOperationError(toAgentHostError(failure).message);
+        if (!controller.signal.aborted && generation === detailRequestGeneration.current) {
+          setOperationError(toAgentHostError(failure).message);
+        }
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      detailRequestGeneration.current += 1;
+    };
   }, [client, detailGeneration, selectedId]);
 
   const select = useCallback((agentId: string) => {

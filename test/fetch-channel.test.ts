@@ -43,11 +43,14 @@ describe("FetchHttpChannel", () => {
     expect(
       () => new FetchHttpChannel({ baseUrl: "https://agents.example.test", allowRemoteHttps: true }),
     ).not.toThrow();
-    expect(() => new FetchHttpChannel({ baseUrl: "//agents.example.test" })).toThrow(/one slash/);
-    expect(() => new FetchHttpChannel({ baseUrl: "/\\evil.example" })).toThrow(/backslashes/);
-    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host\\escape" })).toThrow(/backslashes/);
-    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host?token=secret" })).toThrow(/query parameters/);
-    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host#fragment" })).toThrow(/fragments/);
+    expect(() => new FetchHttpChannel({ baseUrl: "//agents.example.test" })).toThrow(/literal path/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/\\evil.example" })).toThrow(/literal path/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host\\escape" })).toThrow(/literal path/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/../private" })).toThrow(/traversal/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/%2e%2e/private" })).toThrow(/encoded separators/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host%2fprivate" })).toThrow(/encoded separators/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host?token=secret" })).toThrow(/literal path/);
+    expect(() => new FetchHttpChannel({ baseUrl: "/agent-host#fragment" })).toThrow(/literal path/);
   });
 
   it("maps authorization responses to structured errors without logging bodies", async () => {

@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { App, type DailyDriverControls } from "../src/App.js";
 import { DefaultAgentHostClient } from "../src/client.js";
 import { AgentHostError } from "../src/errors.js";
+import type { AgentDetail } from "../src/domain.js";
 import type { DashboardNotificationPermission, NotificationCoordinator, NotificationGateway } from "../src/daily/notifications.js";
 import { defaultPreferences, type DashboardPreferences } from "../src/daily/preferences.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
@@ -250,6 +251,90 @@ describe("evaluation dashboard", () => {
 
     releaseEvents();
     await waitFor(() => expect(detail.mock.calls.length).toBeGreaterThan(callsBeforeEvent));
+  });
+
+  it("ignores a stale detail response after selection changes", async () => {
+    const transport = new MockAgentHostTransport();
+    const pending: Array<{ id: string; resolve: (detail: AgentDetail) => void }> = [];
+    transport.detail = async (id) => await new Promise<AgentDetail>((resolve) => pending.push({ id, resolve }));
+    const { user } = renderDashboard(transport);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    const nextRow = (await screen.findAllByRole("button", { name: /Sanitized agent/ }))
+      .find((row) => row.getAttribute("aria-current") !== "true")!;
+
+    await user.click(nextRow);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    const nextSummary = transport.currentSnapshot.agents.find((agent) => agent.id === pending[1]!.id)!;
+    await act(async () => pending[1]!.resolve({ ...nextSummary, pendingApprovals: [] }));
+    expect(screen.getByRole("heading", { name: nextSummary.name })).toBeInTheDocument();
+
+    const staleSummary = transport.currentSnapshot.agents.find((agent) => agent.id === pending[0]!.id)!;
+    await act(async () => pending[0]!.resolve({ ...staleSummary, name: "Stale detail", pendingApprovals: [] }));
+    expect(screen.queryByRole("heading", { name: "Stale detail" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: nextSummary.name })).toBeInTheDocument();
+  });
+
+  it("clears detail and action capabilities when the selected agent is removed", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    transport.eventStreams = [[{ type: "agent.removed", revision: 41, agentId: "demo:agent-0002" }]];
+    const { user } = renderDashboard(transport);
+    await user.click(await screen.findByRole("button", { name: /Sanitized agent 0002/ }));
+    await screen.findByRole("heading", { name: "Sanitized agent 0002" });
+
+    releaseEvents();
+    expect(await screen.findByText("Select an agent to inspect its public details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an agent to inspect available actions.")).toBeInTheDocument();
+  });
+
+  it("bounds off-page event bursts to one authoritative reload", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    transport.eventStreams = [Array.from({ length: 20 }, (_, index) => ({
+      type: "agent.upserted" as const,
+      revision: 41 + index,
+      agent: { ...createLargeDemoSnapshot().agents[60]!, id: `demo:off-page-${index}` },
+    }))];
+    const snapshot = vi.spyOn(transport, "snapshot");
+    renderDashboard(transport);
+    await screen.findByText("50 shown of 1000");
+    const callsBeforeEvents = snapshot.mock.calls.length;
+
+    releaseEvents();
+    await screen.findByText("r60");
+    await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(callsBeforeEvents + 1), { timeout: 1_000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(snapshot).toHaveBeenCalledTimes(callsBeforeEvents + 1);
+  });
+
+  it("cancels a scheduled reload when the client rotates", async () => {
+    let releaseEvents: () => void = () => undefined;
+    const oldTransport = new MockAgentHostTransport();
+    oldTransport.currentSnapshot = createLargeDemoSnapshot();
+    oldTransport.holdEventStreams = true;
+    oldTransport.eventStreamGate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    oldTransport.eventStreams = [[{
+      type: "agent.upserted",
+      revision: 41,
+      agent: { ...createLargeDemoSnapshot().agents[60]!, id: "demo:off-page-rotation" },
+    }]];
+    const oldSnapshot = vi.spyOn(oldTransport, "snapshot");
+    const oldClient = new DefaultAgentHostClient(oldTransport, { supportedApiVersions: ["1"] });
+    const newTransport = new MockAgentHostTransport();
+    newTransport.currentSnapshot = createLargeDemoSnapshot();
+    newTransport.holdEventStreams = true;
+    const newClient = new DefaultAgentHostClient(newTransport, { supportedApiVersions: ["1"] });
+    const rendered = render(<App client={oldClient} />);
+    await screen.findByText("50 shown of 1000");
+
+    releaseEvents();
+    await screen.findByText("r41");
+    rendered.rerender(<App client={newClient} />);
+    const callsAfterRotation = oldSnapshot.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(oldSnapshot).toHaveBeenCalledTimes(callsAfterRotation);
   });
 
   it("preserves an unsent draft across an SSE reconnect", async () => {

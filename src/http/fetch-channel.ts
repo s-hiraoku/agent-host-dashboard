@@ -19,15 +19,20 @@ export interface FetchHttpChannelOptions {
 export function normalizeAgentHostBaseUrl(input: string, allowRemoteHttps = false): string {
   const baseUrl = input.trim();
   if (baseUrl.startsWith("/")) {
+    const normalizedPath = baseUrl === "/" ? "/" : baseUrl.replace(/\/$/, "");
+    const segments = normalizedPath.split("/").slice(1);
     if (
-      !/^\/(?!\/)[^\\?#\u0000-\u001f\u007f]*$/.test(baseUrl)
+      baseUrl.startsWith("//") ||
+      (normalizedPath !== "/" &&
+        (!/^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/.test(normalizedPath) ||
+          segments.some((segment) => segment === "." || segment === "..")))
     ) {
       throw new AgentHostError(
         "unsupported",
-        "Same-origin connection paths must start with one slash and cannot contain authorities, backslashes, control characters, query parameters, or fragments.",
+        "Same-origin connection paths must be literal path segments without authorities, traversal, encoded separators, query parameters, or fragments.",
       );
     }
-    return baseUrl === "/" ? baseUrl : baseUrl.replace(/\/$/, "");
+    return normalizedPath;
   }
   let url: URL;
   try {
