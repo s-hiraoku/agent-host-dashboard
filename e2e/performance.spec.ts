@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("keeps the 1,000-agent scenario within interaction and DOM budgets", async ({ page }, testInfo) => {
   const navigationStarted = Date.now();
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await expect(page.getByText("50 shown of 1000")).toBeVisible();
   const readyMs = Date.now() - navigationStarted;
 

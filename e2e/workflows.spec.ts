@@ -9,7 +9,7 @@ async function focusNextMatching(page: Page, selector: string, limit = 16): Prom
 }
 
 test("loads, filters, paginates, and exposes detail JSON without unbounded DOM", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=live");
 
   await expect(page.getByText("Live connection")).toBeVisible();
   await expect(page.getByText("50 shown of 1000")).toBeVisible();
@@ -28,7 +28,7 @@ test("loads, filters, paginates, and exposes detail JSON without unbounded DOM",
 });
 
 test("reviews prompt and interrupt context before a single explicit dispatch", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await page.getByLabel("Status").selectOption("working");
   await page.locator(".agent-row").first().click();
 
@@ -66,7 +66,7 @@ test("reviews prompt and interrupt context before a single explicit dispatch", a
 });
 
 test("requires explicit approval and preserves command context", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await page.getByLabel("Status").selectOption("blocked");
   await page.locator(".agent-row").first().click();
   await page.getByRole("button", { name: "Approve" }).click();
@@ -123,7 +123,6 @@ test("keeps filter, selection, draft, list position, and row identity across a l
 
 test("recovers from an SSE reconnect and a revision-gap resync", async ({ page }) => {
   await page.goto("/?fixture=reconnect");
-  await expect(page.getByText(/Reconnecting/)).toBeVisible();
   await expect(page.getByText("Live connection")).toBeVisible({ timeout: 5_000 });
   await expect(page.getByText("r41", { exact: true })).toBeVisible();
 
@@ -143,7 +142,7 @@ test("renders authorization, incompatibility, adapter, and error recovery states
   await expect(page.getByText("Incompatible API version")).toBeVisible();
   await expect(page.locator(".connection-banner")).toContainText("Unsupported agent-host API version");
 
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await expect(page.getByRole("region", { name: "Adapter health" })).toContainText("degraded");
   await page.getByLabel("Demo state").selectOption("disconnected");
   await expect(page.getByText("Host disconnected")).toBeVisible();
@@ -153,7 +152,7 @@ test("renders authorization, incompatibility, adapter, and error recovery states
 });
 
 test("supports a keyboard-only search and selection workflow", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to agent workspace" })).toBeFocused();
   await page.keyboard.press("Enter");

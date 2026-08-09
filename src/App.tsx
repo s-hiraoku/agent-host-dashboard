@@ -11,9 +11,12 @@ import {
   Code2,
   Command,
   HeartPulse,
+  LayoutDashboard,
+  LockKeyhole,
   Pause,
   RefreshCw,
   Search,
+  Settings,
   Send,
   Server,
   ShieldAlert,
@@ -22,12 +25,13 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
 import { agentActions, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
 import { useDashboard, type DashboardQuery } from "./dashboard/use-dashboard.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
+import { agentColumns, densities, type DashboardPreferences } from "./daily/preferences.js";
 
 type DemoScenario = "live" | "disconnected" | "stale" | "unauthorized" | "incompatible" | "blocked" | "error";
 
@@ -278,9 +282,63 @@ function updateQuery(query: DashboardQuery, patch: Partial<DashboardQuery>): Das
   return { ...query, ...patch };
 }
 
-export function App({ client, now = Date.now }: { readonly client: AgentHostClient; readonly now?: () => number }) {
-  const model = useDashboard(client);
+export interface DailyDriverControls {
+  readonly preferences: DashboardPreferences;
+  readonly onPreferencesChange: (update: DashboardPreferences | ((current: DashboardPreferences) => DashboardPreferences)) => void;
+  readonly onReconnect: () => void;
+  readonly onTerminalFailure: () => void;
+  readonly onClearPreferences: () => void;
+  readonly environmentNotice?: string;
+}
+
+function SettingsSurface({ controls, onWorkspace }: { readonly controls: DailyDriverControls; readonly onWorkspace: () => void }) {
+  const update = (patch: Partial<DashboardPreferences>) => controls.onPreferencesChange((current) => ({ ...current, ...patch }));
+  return (
+    <main id="main-content" tabIndex={-1} className="settings-workspace">
+      <header className="settings-heading"><div><p className="eyebrow">Daily-driver preferences</p><h1>Settings</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
+      <section className="settings-card" aria-labelledby="appearance-heading">
+        <div><p className="eyebrow">Appearance</p><h2 id="appearance-heading">Density and agent columns</h2></div>
+        <label><span>Density</span><select value={controls.preferences.density} onChange={(event) => update({ density: event.target.value as DashboardPreferences["density"] })}>{densities.map((density) => <option key={density} value={density}>{density}</option>)}</select></label>
+        <fieldset><legend>Visible agent columns</legend>{agentColumns.map((column) => <label key={column}><input type="checkbox" checked={controls.preferences.columns.includes(column)} onChange={(event) => controls.onPreferencesChange((current) => ({ ...current, columns: event.target.checked ? [...current.columns, column] : current.columns.filter((item) => item !== column) }))} />{column}</label>)}</fieldset>
+      </section>
+      <section className="settings-card" aria-labelledby="connection-settings-heading">
+        <div><p className="eyebrow">Connection</p><h2 id="connection-settings-heading">Local agent-host</h2></div>
+        <dl><div><dt>Endpoint</dt><dd className="mono">{controls.preferences.endpoint}</dd></div><div><dt>Credential</dt><dd>Memory only · cleared on disconnect or reload</dd></div></dl>
+        <button className="danger-button" type="button" onClick={controls.onReconnect}>Change connection</button>
+      </section>
+    </main>
+  );
+}
+
+function PrivacySurface({ onWorkspace, onClear }: { readonly onWorkspace: () => void; readonly onClear: () => void }) {
+  return (
+    <main id="main-content" tabIndex={-1} className="settings-workspace">
+      <header className="settings-heading"><div><p className="eyebrow">Local data boundary</p><h1>Privacy</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
+      <section className="settings-card privacy-card">
+        <LockKeyhole aria-hidden="true" />
+        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, and saved view names may be stored locally. Credentials, prompt drafts, commands, cwd values, raw JSON, and agent snapshots are never persisted.</p></div>
+      </section>
+      <section className="settings-card">
+        <div><p className="eyebrow">Reset</p><h2>Clear local dashboard data</h2><p>This removes saved views and appearance choices from storage. The current workspace stays in memory until reload; the active credential is cleared when you change connection.</p></div>
+        <button className="danger-button" type="button" onClick={onClear}>Clear local preferences</button>
+      </section>
+    </main>
+  );
+}
+
+export function App({ client, now = Date.now, dailyDriver, showDemoControls = true }: { readonly client: AgentHostClient; readonly now?: () => number; readonly dailyDriver?: DailyDriverControls; readonly showDemoControls?: boolean }) {
+  const onQueryChange = useCallback((query: DashboardQuery) => {
+    if (!dailyDriver) return;
+    dailyDriver.onPreferencesChange((current) => ({
+      ...current,
+      query: { status: query.status, provider: query.provider, sort: query.sort },
+    }));
+  }, [dailyDriver]);
+  const model = useDashboard(client, {
+    ...(dailyDriver ? { initialQuery: { text: "", ...dailyDriver.preferences.query }, onQueryChange } : {}),
+  });
   const [scenario, setScenario] = useState<DemoScenario>("live");
+  const [surface, setSurface] = useState<"workspace" | "settings" | "privacy">("workspace");
   const displayConnection = scenarioStates[scenario] ?? model.connection;
   const displayError = model.error === displayConnection.reason ? undefined : model.error;
   const metrics = statusMetrics(model.snapshot);
@@ -302,13 +360,35 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
     [model.detail],
   );
 
+  const saveCurrentView = () => {
+    if (!dailyDriver) return;
+    dailyDriver.onPreferencesChange((current) => {
+      if (current.savedViews.length >= 12) return current;
+      const sequence = current.savedViews.length + 1;
+      return {
+        ...current,
+        savedViews: [...current.savedViews, {
+          id: `view-${Date.now()}-${sequence}`,
+          name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : model.query.status}`,
+          status: model.query.status,
+          provider: model.query.provider,
+          sort: model.query.sort,
+        }],
+      };
+    });
+  };
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell density-${dailyDriver?.preferences.density ?? "comfortable"}`}>
       <a className="skip-link" href="#main-content">Skip to agent workspace</a>
       <header className="topbar">
         <div className="brand"><Server aria-hidden="true" /><div><span>Agent Host</span><strong>Console</strong></div></div>
-        <ConnectionBanner state={displayConnection} onRetry={() => void model.refresh()} />
-        <label className="scenario-control">
+        <ConnectionBanner state={displayConnection} onRetry={() => {
+          if (dailyDriver && (displayConnection.status === "unauthorized" || displayConnection.status === "incompatible")) dailyDriver.onTerminalFailure();
+          else void model.refresh();
+        }} />
+        {dailyDriver && <nav className="utility-nav" aria-label="Dashboard sections"><button type="button" aria-current={surface === "workspace" ? "page" : undefined} onClick={() => setSurface("workspace")}><LayoutDashboard />Workspace</button><button type="button" aria-current={surface === "settings" ? "page" : undefined} onClick={() => setSurface("settings")}><Settings />Settings</button><button type="button" aria-current={surface === "privacy" ? "page" : undefined} onClick={() => setSurface("privacy")}><LockKeyhole />Privacy</button></nav>}
+        {showDemoControls && <label className="scenario-control">
           <span>Demo state</span>
           <select value={scenario} onChange={(event) => setScenario(event.target.value as DemoScenario)}>
             <option value="live">Live</option>
@@ -319,10 +399,14 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
             <option value="unauthorized">Unauthorized</option>
             <option value="incompatible">Incompatible</option>
           </select>
-        </label>
+        </label>}
       </header>
+      {dailyDriver?.environmentNotice && <div className="environment-notice" role="status"><ShieldAlert aria-hidden="true" />{dailyDriver.environmentNotice}</div>}
 
-      <section className="summary-strip" aria-labelledby="summary-heading">
+      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={() => setSurface("workspace")} />}
+      {surface === "privacy" && dailyDriver && <PrivacySurface onWorkspace={() => setSurface("workspace")} onClear={dailyDriver.onClearPreferences} />}
+      <div hidden={surface !== "workspace"}>
+        <section className="summary-strip" aria-labelledby="summary-heading">
         <div className="total-metric"><p className="eyebrow" id="summary-heading">Current scope</p><strong>{model.snapshot?.total?.toLocaleString() ?? "—"}</strong><span>agents</span></div>
         {metrics.map((metric) => (
           <button key={metric.status} type="button" className={`summary-metric ${metric.urgent ? "urgent" : ""}`} onClick={() => model.setQuery(updateQuery(model.query, { status: metric.status }))}>
@@ -332,10 +416,11 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
         <div className="adapter-summary"><HeartPulse aria-hidden="true" /><div><strong>{model.health.filter((item) => item.status === "healthy").length}/{model.health.length}</strong><span>adapters healthy</span></div></div>
       </section>
 
-      <main id="main-content" tabIndex={-1} className="workspace">
+      <main id={surface === "workspace" ? "main-content" : undefined} tabIndex={-1} className="workspace">
         <section className="agent-rail panel" aria-labelledby="agents-heading">
           <div className="rail-heading"><div><p className="eyebrow">Attention queue</p><h1 id="agents-heading">Agents</h1></div><button type="button" className="icon-button" onClick={() => void model.refresh()} aria-label="Refresh agents"><RefreshCw /></button></div>
           <div className="filters">
+            {dailyDriver && <div className="saved-view-row"><label><span>Saved view</span><select defaultValue="" onChange={(event) => { const view = dailyDriver.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) model.setQuery({ text: "", status: view.status, provider: view.provider, sort: view.sort }); }}><option value="">Current filters</option>{dailyDriver.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><button type="button" onClick={saveCurrentView}>Save view</button></div>}
             <label className="search-field"><span className="visually-hidden">Search agents</span><Search aria-hidden="true" /><input value={model.query.text} onChange={(event) => model.setQuery(updateQuery(model.query, { text: event.target.value }))} placeholder="Search agents" /></label>
             <div className="filter-row">
               <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{metric.status}</option>)}</select></label>
@@ -359,7 +444,7 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
               <li key={agent.id}>
                 <button type="button" className={`agent-row ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => model.select(agent.id)} aria-current={agent.id === model.selectedId ? "true" : undefined}>
                   <span className="agent-row-top"><strong>{agent.name}</strong><StatusBadge status={agent.status} /></span>
-                  <span className="agent-row-meta"><span>{agent.provider}</span><span>{agent.project ?? "No project"}</span><span>{formatActivity(agent.lastActivityAt, currentTime)}</span></span>
+                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span>{agent.project ?? "No project"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
                 </button>
               </li>
             ))}
@@ -405,7 +490,8 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
         </section>
 
         <ActionPanel detail={model.detail} perform={model.perform} />
-      </main>
+        </main>
+      </div>
       {displayError && <div className="global-error" role="alert"><AlertTriangle />{displayError}<button type="button" onClick={() => void model.refresh()}>Retry</button></div>}
     </div>
   );

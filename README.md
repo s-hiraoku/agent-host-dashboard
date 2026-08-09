@@ -57,29 +57,32 @@ npm run dev
 npm run check
 ```
 
-The development server starts the dashboard with the deterministic 1,000-agent
-fixture. Use the **Demo state** control to reproduce live, blocked, error,
-disconnected, stale, unauthorized, and incompatible states without a running
-host. The UI paginates the fixture in bounded 50-agent pages rather than
-mounting all records in the DOM.
+The development server starts with connection onboarding in an explicitly
+labelled fixture-only simulation mode. Production builds fail closed until the
+versioned public HTTP/SSE wire contract is confirmed. The deterministic
+evaluation workspace remains available at `/?fixture=live`; its **Demo state**
+control reproduces live, blocked, error, disconnected, stale, unauthorized, and
+incompatible states without a running host. The UI paginates the 1,000-agent
+fixture in bounded 50-agent pages rather than mounting all records in the DOM.
 
 `npm run check` runs strict type checking, unit tests, and the production
 dashboard and client-module build.
 
-### Connecting a local host
+### Preparing a local-host connector
 
-The browser always calls the same-origin `/agent-host` path. During development,
-Vite can proxy that path to a loopback host:
+The framework-independent fetch channel can target the same-origin `/agent-host`
+path. During development, Vite can proxy that path to a loopback host:
 
 ```bash
 AGENT_HOST_URL=http://127.0.0.1:9417 npm run dev
 ```
 
-If the confirmed backend authentication contract requires a bearer token, pass
-it only to the server-side development process with `AGENT_HOST_TOKEN`. Vite
-injects the header while proxying; it is never compiled into browser assets or
-written to browser storage. The production app still requires a confirmed
-`AgentHostWireProtocol` implementation before it can connect to agent-host.
+If the confirmed backend authentication contract requires a bearer token, a
+development-only proxy can receive it from `AGENT_HOST_TOKEN`; it is never
+compiled into browser assets or written to browser storage. The checked-in UI
+does not call this proxy yet: development onboarding uses labelled fixtures and
+the production entry fails closed until a confirmed `AgentHostWireProtocol`
+implementation can connect to agent-host.
 
 ## Dashboard interaction model
 
@@ -105,3 +108,12 @@ keyboard, narrow viewport, reconnect/resync, and 1,000-agent performance gates
 are reproducible with the commands in
 [docs/conformance.md](docs/conformance.md). Failed Playwright runs retain a
 screenshot and trace, and CI uploads those artifacts with the HTML report.
+
+## Daily-driver session
+
+The default app entry opens first-run connection onboarding. Credentials live
+only in memory and are cleared on failure, connection change, or reload. The
+dashboard persists only a strict, versioned projection of non-secret appearance
+and semantic filter preferences. See
+[docs/daily-driver.md](docs/daily-driver.md) for the connector lease, privacy
+boundary, migration behavior, and current backend dependencies.

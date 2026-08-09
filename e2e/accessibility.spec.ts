@@ -7,13 +7,13 @@ async function expectNoViolations(page: Page): Promise<void> {
 }
 
 test("has no automated accessibility violations in the live workspace", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await expect(page.getByText("50 shown of 1000")).toBeVisible();
   await expectNoViolations(page);
 });
 
 test("keeps the contextual approval dialog accessible", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await page.getByLabel("Status").selectOption("blocked");
   await page.locator(".agent-row").first().click();
   await page.getByRole("button", { name: "Approve" }).click();
@@ -33,6 +33,23 @@ test("uses non-color status text and honors reduced motion", async ({ page }) =>
   expect(durationMs).toBeLessThanOrEqual(0.01);
   await expectNoViolations(page);
 
-  await page.goto("/");
+  await page.goto("/?fixture=live");
   await expect(page.locator(".agent-row").first().locator(".status-badge")).toContainText(/blocked|error|working|idle|done|unknown/);
+});
+
+test("keeps onboarding and recovery guidance accessible", async ({ page }) => {
+  await page.goto("/?connection=unauthorized");
+  await expectNoViolations(page);
+  await page.getByRole("button", { name: "Connect securely" }).click();
+  await expect(page.getByRole("alert")).toContainText("credential was cleared");
+  await expectNoViolations(page);
+});
+
+test("keeps daily-driver settings and privacy surfaces accessible", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connect securely" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expectNoViolations(page);
+  await page.getByRole("button", { name: "Privacy" }).click();
+  await expectNoViolations(page);
 });

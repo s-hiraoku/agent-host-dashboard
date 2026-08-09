@@ -140,4 +140,26 @@ describe("evaluation dashboard", () => {
     await waitFor(() => expect(screen.getByText("Live connection")).toBeInTheDocument(), { timeout: 2_000 });
     expect(screen.getByText("Detail is unavailable.")).toBeInTheDocument();
   });
+
+  it("preserves an unsent draft across an SSE reconnect", async () => {
+    let releaseStream: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    transport.eventStreams = [
+      new AgentHostError("connection_failed", "Stream interrupted.", { retryable: true }),
+      [{ type: "heartbeat", revision: 41 }],
+    ];
+    const { user } = renderDashboard(transport);
+    await user.selectOptions(screen.getByLabelText("Status"), "working");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent/ }))[0]!);
+    await user.type(await screen.findByLabelText("Prompt"), "Keep this reconnect draft");
+
+    releaseStream();
+
+    await waitFor(() => expect(screen.getByText("Live connection")).toBeInTheDocument(), { timeout: 2_000 });
+    await waitFor(() => expect(screen.getByText("r41")).toBeInTheDocument(), { timeout: 2_000 });
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Keep this reconnect draft");
+  });
 });

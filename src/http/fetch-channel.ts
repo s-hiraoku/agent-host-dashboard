@@ -16,7 +16,8 @@ export interface FetchHttpChannelOptions {
   readonly allowRemoteHttps?: boolean;
 }
 
-function validateBaseUrl(baseUrl: string, allowRemoteHttps: boolean): void {
+export function normalizeAgentHostBaseUrl(input: string, allowRemoteHttps = false): string {
+  const baseUrl = input.trim();
   if (baseUrl.startsWith("/")) {
     if (baseUrl.startsWith("//") || baseUrl.includes("?") || baseUrl.includes("#")) {
       throw new AgentHostError(
@@ -24,7 +25,7 @@ function validateBaseUrl(baseUrl: string, allowRemoteHttps: boolean): void {
         "Same-origin connection paths must start with one slash and cannot contain query parameters or fragments.",
       );
     }
-    return;
+    return baseUrl === "/" ? baseUrl : baseUrl.replace(/\/$/, "");
   }
   let url: URL;
   try {
@@ -36,8 +37,8 @@ function validateBaseUrl(baseUrl: string, allowRemoteHttps: boolean): void {
     throw new AgentHostError("unsupported", "Connection URLs cannot contain credentials, query parameters, or fragments.");
   }
   const loopback = url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname === "localhost";
-  if (loopback && url.protocol === "http:") return;
-  if (allowRemoteHttps && url.protocol === "https:") return;
+  if (loopback && url.protocol === "http:") return url.toString();
+  if (allowRemoteHttps && url.protocol === "https:") return url.toString();
   throw new AgentHostError(
     "unsupported",
     "AgentHost connections must use same-origin, loopback HTTP, or explicitly enabled remote HTTPS.",
@@ -63,8 +64,7 @@ export class FetchHttpChannel implements HttpChannel {
   private readonly fetchImpl: typeof globalThis.fetch;
 
   constructor(options: FetchHttpChannelOptions = {}) {
-    this.baseUrl = options.baseUrl ?? "/agent-host";
-    validateBaseUrl(this.baseUrl, options.allowRemoteHttps ?? false);
+    this.baseUrl = normalizeAgentHostBaseUrl(options.baseUrl ?? "/agent-host", options.allowRemoteHttps ?? false);
     this.authentication = options.authentication;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }
