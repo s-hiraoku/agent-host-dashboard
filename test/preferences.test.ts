@@ -26,14 +26,28 @@ describe("daily-driver preferences", () => {
     });
 
     expect(migrated).toEqual({
-      version: 2,
+      version: 3,
       endpoint: "http://localhost:8787/",
       density: "compact",
       columns: ["provider"],
       query: { status: "blocked", provider: "demo", sort: { field: "name", direction: "asc" } },
       savedViews: [],
+      notifications: { enabled: false, blocked: true, completed: true, error: true },
     });
     expect(JSON.stringify(migrated)).not.toMatch(/token|private search|private-session/i);
+  });
+
+  it("migrates version 2 and strictly projects notification preferences", () => {
+    expect(sanitizePreferences({
+      ...defaultPreferences,
+      version: 2,
+      notifications: { enabled: true, blocked: false, completed: false, error: false, token: "drop" },
+    })).toMatchObject({ version: 3, notifications: { enabled: false, blocked: true, completed: true, error: true } });
+    expect(sanitizePreferences({
+      ...defaultPreferences,
+      version: 3,
+      notifications: { enabled: true, blocked: false, completed: true, error: false, providerRules: ["private-id"] },
+    }).notifications).toEqual({ enabled: true, blocked: false, completed: true, error: false });
   });
 
   it("fails closed for corrupt, future, and unsafe preference payloads", () => {

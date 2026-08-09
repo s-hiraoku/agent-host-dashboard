@@ -20,12 +20,20 @@ export interface SavedView extends PersistedQuery {
 }
 
 export interface DashboardPreferences {
-  readonly version: 2;
+  readonly version: 3;
   readonly endpoint: string;
   readonly density: Density;
   readonly columns: readonly AgentColumn[];
   readonly query: PersistedQuery;
   readonly savedViews: readonly SavedView[];
+  readonly notifications: NotificationPreferences;
+}
+
+export interface NotificationPreferences {
+  readonly enabled: boolean;
+  readonly blocked: boolean;
+  readonly completed: boolean;
+  readonly error: boolean;
 }
 
 export interface PreferenceStore {
@@ -40,12 +48,13 @@ const sortDirections = new Set<AgentSort["direction"]>(["asc", "desc"]);
 const defaultSort: AgentSort = { field: "status", direction: "asc" };
 
 export const defaultPreferences: DashboardPreferences = {
-  version: 2,
+  version: 3,
   endpoint: "http://127.0.0.1:8787/",
   density: "comfortable",
   columns: [...agentColumns],
   query: { status: "all", provider: "", sort: defaultSort },
   savedViews: [],
+  notifications: { enabled: false, blocked: true, completed: true, error: true },
 };
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -104,7 +113,7 @@ function safeSavedViews(value: unknown): readonly SavedView[] {
 
 export function sanitizePreferences(value: unknown): DashboardPreferences {
   const input = record(value);
-  if (!input || (input.version !== 1 && input.version !== 2)) return defaultPreferences;
+  if (!input || (input.version !== 1 && input.version !== 2 && input.version !== 3)) return defaultPreferences;
   const columns = Array.isArray(input.columns)
     ? [...new Set(input.columns.filter((column): column is AgentColumn =>
       typeof column === "string" && agentColumns.includes(column as AgentColumn),
@@ -114,12 +123,20 @@ export function sanitizePreferences(value: unknown): DashboardPreferences {
     ? input.density as Density
     : defaultPreferences.density;
   return {
-    version: 2,
+    version: 3,
     endpoint: safeEndpoint(input.endpoint),
     density,
     columns,
     query: safeQuery(input.query),
-    savedViews: input.version === 2 ? safeSavedViews(input.savedViews) : [],
+    savedViews: input.version === 2 || input.version === 3 ? safeSavedViews(input.savedViews) : [],
+    notifications: input.version === 3
+      ? {
+          enabled: record(input.notifications)?.enabled === true,
+          blocked: record(input.notifications)?.blocked !== false,
+          completed: record(input.notifications)?.completed !== false,
+          error: record(input.notifications)?.error !== false,
+        }
+      : defaultPreferences.notifications,
   };
 }
 

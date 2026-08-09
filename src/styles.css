@@ -328,6 +328,7 @@ dd { margin: 0; overflow: hidden; color: var(--text); font-size: 0.76rem; text-o
 
 .settings-workspace { width: min(66rem, calc(100% - 1.5rem)); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin: 0.75rem auto; }
 .settings-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 1rem; border: 1px solid var(--line); background: var(--surface); }
+.surface-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
 .settings-card { display: grid; align-content: start; gap: 1rem; padding: 1rem; border: 1px solid var(--line); background: var(--surface); }
 .settings-card > label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.72rem; }
 .settings-card fieldset { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0; padding: 0.8rem; border: 1px solid var(--line); }
@@ -337,6 +338,20 @@ dd { margin: 0; overflow: hidden; color: var(--text); font-size: 0.76rem; text-o
 .settings-card dl div { display: grid; gap: 0.25rem; padding-block: 0.6rem; border-bottom: 1px solid var(--line); }
 .settings-card dd { white-space: normal; overflow-wrap: anywhere; }
 .settings-card p { color: var(--muted); font-size: 0.75rem; line-height: 1.55; }
+.notification-permission { display: flex; align-items: center; flex-wrap: wrap; gap: 0.7rem; padding: 0.7rem; border: 1px solid var(--line); background: var(--surface-raised); }
+.notification-permission svg { width: 1rem; color: var(--amber); }
+.notification-scopes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; max-height: 14rem; overflow: auto; margin-top: 0.65rem; }
+.notification-scopes fieldset { align-content: start; display: grid; gap: 0.4rem; }
+.activity-list { display: grid; gap: 0.45rem; padding: 0; margin: 0; list-style: none; }
+.activity-list button, .activity-list > li > div { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem; border: 1px solid var(--line); color: var(--text); background: var(--surface-raised); text-align: left; }
+.activity-list button:hover { border-color: var(--line-strong); }
+.activity-list button > span, .action-history li span { display: grid; gap: 0.2rem; }
+.activity-list small { color: var(--muted); }
+.action-history > li > div { display: grid; justify-content: stretch; }
+.diagnostics-grid dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin: 0; }
+.diagnostics-grid dl div { padding: 0.65rem; border: 1px solid var(--line); background: var(--surface-raised); }
+.diagnostics-grid dt { color: var(--muted); font-size: 0.7rem; }
+.diagnostics-grid dd { margin: 0.25rem 0 0; overflow-wrap: anywhere; }
 .privacy-card { grid-column: 1 / -1; grid-template-columns: auto 1fr; }
 .privacy-card > svg { width: 1.35rem; color: var(--green); }
 
@@ -372,7 +387,7 @@ dd { margin: 0; overflow: hidden; color: var(--text); font-size: 0.76rem; text-o
   .agent-facts div { border-inline-end: 0; border-bottom: 1px solid var(--line); }
   .agent-facts div:last-child { border-bottom: 0; }
   .agent-header { align-items: flex-start; }
-  .filter-row, .safe-actions, .approval-actions, .context-grid { grid-template-columns: 1fr; }
+  .filter-row, .safe-actions, .approval-actions, .context-grid, .notification-scopes, .diagnostics-grid dl { grid-template-columns: 1fr; }
   .context-grid div:last-child { grid-column: auto; }
   .timeline li { grid-template-columns: 2.4rem 1.4rem 1fr; }
   .dialog-actions { display: grid; grid-template-columns: 1fr; }

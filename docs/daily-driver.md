@@ -27,13 +27,35 @@ lifecycle requested in agent-host #4.
 
 ## Persisted preferences
 
-`LocalPreferenceStore` is the only localStorage adapter. Its version 2 payload
+`LocalPreferenceStore` is the only localStorage adapter. Its version 3 payload
 contains only the canonical endpoint, status/provider/sort predicates, density,
-selected columns, and bounded saved-view names. It strictly projects known
-fields, migrates version 1, rejects future/corrupt/oversized data, and never
+selected columns, bounded saved-view names, and global notification-type toggles.
+It strictly projects known fields, migrates versions 1 and 2, rejects
+future/corrupt/oversized data, and never
 persists free-text searches, agent IDs, cwd values, prompt drafts, commands,
 snapshots, raw JSON, or error bodies.
 
-Project rules and recent-agent persistence remain intentionally absent until
-the backend contract classifies stable public identifiers that are safe to
-retain. They are tracked for the operational-memory follow-up to dashboard #4.
+Provider/project notification rules, recent agents, and sanitized action history
+remain session-only until the backend contract classifies stable public identifiers
+that are safe to retain. Provider/project choices accumulate from public facets,
+snapshots, and events observed in the current session; complete project enumeration
+remains a backend contract blocker.
+
+## Operational memory and notifications
+
+Desktop notification permission is requested only from the Settings button. The
+dashboard never notifies for initial snapshots or revision-gap resync snapshots;
+only subsequent `agent.upserted` events entering blocked, done, or error states are
+eligible. Unknown prior states are suppressed rather than guessed. A session-only
+cross-tab election shares only revision and transition kind, preventing duplicate
+delivery without broadcasting agent data. Notification clicks revalidate the agent
+through the public client before returning focus to the workspace. Global event-type
+toggles persist, while provider/project scopes remain in memory. The Activity
+surface keeps at most 12 recent agents and 100 action
+records for the current session and provides an explicit clear operation. Action
+records contain only kind, a target label, time, outcome, and a structured error
+code—never agent IDs, cwd, prompt text, commands, approval payloads, or error bodies.
+
+The Diagnostics surface exposes only version compatibility, connection/revision,
+event count, and adapter health from the public domain model. It deliberately
+excludes credentials and private agent/session payloads.

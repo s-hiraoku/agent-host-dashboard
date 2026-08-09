@@ -45,11 +45,11 @@ test("keeps onboarding and recovery guidance accessible", async ({ page }) => {
   await expectNoViolations(page);
 });
 
-test("keeps daily-driver settings and privacy surfaces accessible", async ({ page }) => {
+test("keeps daily-driver operational surfaces accessible", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Connect securely" }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
-  await expectNoViolations(page);
-  await page.getByRole("button", { name: "Privacy" }).click();
-  await expectNoViolations(page);
+  for (const surface of ["Activity", "Diagnostics", "Settings", "Privacy"]) {
+    await page.getByRole("button", { name: surface }).click();
+    await expectNoViolations(page);
+  }
 });

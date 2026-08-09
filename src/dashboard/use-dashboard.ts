@@ -12,6 +12,7 @@ import type {
   AgentSort,
   AgentStatus,
   AgentSummary,
+  ApiInfo,
 } from "../domain.js";
 import { toAgentHostError } from "../errors.js";
 import { applyVisibleEvent, reconcileVisibleEvents } from "./use-cases.js";
@@ -26,11 +27,13 @@ export interface DashboardQuery {
 }
 
 export interface DashboardModel {
+  readonly apiInfo: ApiInfo | undefined;
   readonly snapshot: AgentSnapshot | undefined;
   readonly detail: AgentDetail | undefined;
   readonly health: readonly AdapterHealth[];
   readonly connection: ConnectionState;
   readonly events: readonly AgentEvent[];
+  readonly notificationEvents: readonly AgentEvent[];
   readonly query: DashboardQuery;
   readonly selectedId: string | undefined;
   readonly page: number;
@@ -39,12 +42,23 @@ export interface DashboardModel {
   readonly loading: boolean;
   readonly error: string | undefined;
   readonly actionResult: AgentActionResult | undefined;
+  readonly actionHistory: readonly DashboardActionRecord[];
   setQuery(query: DashboardQuery): void;
   select(agentId: string): void;
   nextPage(): void;
   previousPage(): void;
   refresh(): Promise<void>;
   perform(target: AgentDetail, action: AgentAction): Promise<AgentActionResult>;
+  clearActionHistory(): void;
+}
+
+export interface DashboardActionRecord {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly agentName: string;
+  readonly kind: AgentAction["kind"];
+  readonly outcome: "completed" | "failed";
+  readonly errorCode?: string;
 }
 
 export interface DashboardOptions {
@@ -75,11 +89,13 @@ function matchesQuery(agent: AgentSummary, query: DashboardQuery): boolean {
 }
 
 export function useDashboard(client: AgentHostClient, options: DashboardOptions = {}): DashboardModel {
+  const [apiInfo, setApiInfo] = useState<ApiInfo>();
   const [snapshot, setSnapshot] = useState<AgentSnapshot>();
   const [detail, setDetail] = useState<AgentDetail>();
   const [health, setHealth] = useState<readonly AdapterHealth[]>([]);
   const [connection, setConnection] = useState<ConnectionState>({ status: "connecting", attempt: 0 });
   const [events, setEvents] = useState<readonly AgentEvent[]>([]);
+  const [notificationEvents, setNotificationEvents] = useState<readonly AgentEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [query, setQueryState] = useState<DashboardQuery>(options.initialQuery ?? {
     text: "",
@@ -93,11 +109,15 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const [connectionError, setConnectionError] = useState<string>();
   const [operationError, setOperationError] = useState<string>();
   const [actionResult, setActionResult] = useState<AgentActionResult>();
+  const [actionHistory, setActionHistory] = useState<readonly DashboardActionRecord[]>([]);
+  const actionSequence = useRef(0);
   const queryRef = useRef(query);
   const cursorRef = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
   const requestController = useRef<AbortController | undefined>(undefined);
   const eventBuffer = useRef<readonly AgentEvent[]>([]);
+  const knownStatuses = useRef(new Map<string, AgentStatus>());
+  const snapshotReady = useRef(false);
 
   const load = useCallback(async () => {
     const generation = requestGeneration.current + 1;
@@ -107,7 +127,8 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
     requestController.current = controller;
     setLoading(true);
     try {
-      const [nextSnapshot, nextHealth] = await Promise.all([
+      const [nextApiInfo, nextSnapshot, nextHealth] = await Promise.all([
+        client.discover({ signal: controller.signal }),
         client.snapshot(requestFor(queryRef.current, cursorRef.current), { signal: controller.signal }),
         client.adapterHealth({ signal: controller.signal }),
       ]);
@@ -118,6 +139,9 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         (agent) => matchesQuery(agent, queryRef.current),
       );
       setSnapshot(reconciledSnapshot);
+      for (const agent of reconciledSnapshot.agents) knownStatuses.current.set(agent.id, agent.status);
+      snapshotReady.current = true;
+      setApiInfo(nextApiInfo);
       setHealth(nextHealth);
       setOperationError(undefined);
       setSelectedId((current) => current ?? nextSnapshot.agents[0]?.id);
@@ -140,11 +164,25 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
           if (value.status === "connected") setConnectionError(undefined);
         }
       },
-      onSnapshot: () => {
-        if (active) void load();
+      onSnapshot: (authoritativeSnapshot) => {
+        if (active) {
+          for (const agent of authoritativeSnapshot.agents) knownStatuses.current.set(agent.id, agent.status);
+          snapshotReady.current = true;
+          void load();
+        }
       },
       onEvent: (event) => {
         if (!active) return;
+        if (event.type === "agent.upserted") {
+          const previousStatus = knownStatuses.current.get(event.agent.id);
+          knownStatuses.current.set(event.agent.id, event.agent.status);
+          const attentionStatus = event.agent.status === "blocked" || event.agent.status === "done" || event.agent.status === "error";
+          if (snapshotReady.current && previousStatus !== undefined && attentionStatus && previousStatus !== event.agent.status) {
+            setNotificationEvents((current) => [event, ...current].slice(0, 100));
+          }
+        } else if (event.type === "agent.removed") {
+          knownStatuses.current.delete(event.agentId);
+        }
         eventBuffer.current = [...eventBuffer.current, event].slice(-500);
         setEvents((current) => [event, ...current].slice(0, 100));
         setSnapshot((current) =>
@@ -214,20 +252,38 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
 
   const perform = useCallback(
     async (target: AgentDetail, action: AgentAction) => {
-      const result = await client.action({ id: target.id, capabilities: target.capabilities }, action);
-      setActionResult(result);
-      return result;
+      actionSequence.current += 1;
+      const base = {
+        id: `action-${actionSequence.current}`,
+        occurredAt: new Date().toISOString(),
+        agentName: target.name,
+        kind: action.kind,
+      } as const;
+      try {
+        const result = await client.action({ id: target.id, capabilities: target.capabilities }, action);
+        setActionResult(result);
+        const record: DashboardActionRecord = { ...base, outcome: "completed" };
+        setActionHistory((current) => [record, ...current].slice(0, 100));
+        return result;
+      } catch (error) {
+        const failure = toAgentHostError(error);
+        const record: DashboardActionRecord = { ...base, outcome: "failed", errorCode: failure.code };
+        setActionHistory((current) => [record, ...current].slice(0, 100));
+        throw error;
+      }
     },
     [client],
   );
 
   return useMemo(
     () => ({
+      apiInfo,
       snapshot,
       detail,
       health,
       connection,
       events,
+      notificationEvents,
       query,
       selectedId,
       page,
@@ -236,15 +292,19 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       loading,
       error: operationError ?? connectionError,
       actionResult,
+      actionHistory,
       setQuery,
       select: setSelectedId,
       nextPage,
       previousPage,
       refresh: load,
       perform,
+      clearActionHistory: () => setActionHistory([]),
     }),
     [
       actionResult,
+      actionHistory,
+      apiInfo,
       connection,
       detail,
       connectionError,
@@ -253,6 +313,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       load,
       loading,
       nextPage,
+      notificationEvents,
       operationError,
       page,
       perform,

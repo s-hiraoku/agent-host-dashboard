@@ -2,12 +2,14 @@ import {
   Activity,
   AlertTriangle,
   Ban,
+  Bell,
   Check,
   ChevronLeft,
   ChevronRight,
   Circle,
   CircleCheck,
   CircleX,
+  Clock3,
   Code2,
   Command,
   HeartPulse,
@@ -20,6 +22,7 @@ import {
   Send,
   Server,
   ShieldAlert,
+  Stethoscope,
   TerminalSquare,
   Wifi,
   WifiOff,
@@ -29,8 +32,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
 import { agentActions, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
-import { useDashboard, type DashboardQuery } from "./dashboard/use-dashboard.js";
+import { useDashboard, type DashboardActionRecord, type DashboardQuery } from "./dashboard/use-dashboard.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
+import { notificationFromEvent, shouldNotify, type DashboardNotificationPermission, type NotificationCoordinator, type NotificationGateway } from "./daily/notifications.js";
 import { agentColumns, densities, type DashboardPreferences } from "./daily/preferences.js";
 
 type DemoScenario = "live" | "disconnected" | "stale" | "unauthorized" | "incompatible" | "blocked" | "error";
@@ -288,24 +292,53 @@ export interface DailyDriverControls {
   readonly onReconnect: () => void;
   readonly onTerminalFailure: () => void;
   readonly onClearPreferences: () => void;
+  readonly notificationGateway: NotificationGateway;
+  readonly notificationCoordinator: NotificationCoordinator;
   readonly environmentNotice?: string;
 }
 
-function SettingsSurface({ controls, onWorkspace }: { readonly controls: DailyDriverControls; readonly onWorkspace: () => void }) {
+function SettingsSurface({ controls, onWorkspace, notificationPermission, onRequestNotifications, providers, projects, mutedProviders, mutedProjects, onToggleProvider, onToggleProject }: {
+  readonly controls: DailyDriverControls;
+  readonly onWorkspace: () => void;
+  readonly notificationPermission: DashboardNotificationPermission;
+  readonly onRequestNotifications: () => void;
+  readonly providers: readonly string[];
+  readonly projects: readonly string[];
+  readonly mutedProviders: ReadonlySet<string>;
+  readonly mutedProjects: ReadonlySet<string>;
+  readonly onToggleProvider: (provider: string) => void;
+  readonly onToggleProject: (project: string) => void;
+}) {
   const update = (patch: Partial<DashboardPreferences>) => controls.onPreferencesChange((current) => ({ ...current, ...patch }));
+  const updateNotifications = (patch: Partial<DashboardPreferences["notifications"]>) => controls.onPreferencesChange((current) => ({ ...current, notifications: { ...current.notifications, ...patch } }));
   return (
     <main id="main-content" tabIndex={-1} className="settings-workspace">
       <header className="settings-heading"><div><p className="eyebrow">Daily-driver preferences</p><h1>Settings</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
       <section className="settings-card" aria-labelledby="appearance-heading">
         <div><p className="eyebrow">Appearance</p><h2 id="appearance-heading">Density and agent columns</h2></div>
-        <label><span>Density</span><select value={controls.preferences.density} onChange={(event) => update({ density: event.target.value as DashboardPreferences["density"] })}>{densities.map((density) => <option key={density} value={density}>{density}</option>)}</select></label>
+        <label htmlFor="density-setting"><span>Density</span><select id="density-setting" value={controls.preferences.density} onChange={(event) => update({ density: event.target.value as DashboardPreferences["density"] })}>{densities.map((density) => <option key={density} value={density}>{density}</option>)}</select></label>
         <fieldset><legend>Visible agent columns</legend>{agentColumns.map((column) => <label key={column}><input type="checkbox" checked={controls.preferences.columns.includes(column)} onChange={(event) => controls.onPreferencesChange((current) => ({ ...current, columns: event.target.checked ? [...current.columns, column] : current.columns.filter((item) => item !== column) }))} />{column}</label>)}</fieldset>
+      </section>
+      <section className="settings-card" aria-labelledby="notification-heading">
+        <div><p className="eyebrow">Attention notifications</p><h2 id="notification-heading">Blocked, completed, and error events</h2><p>Only new semantic events can notify. Initial snapshots and resyncs stay silent.</p></div>
+        <div className="notification-permission"><Bell aria-hidden="true" /><span>Browser permission: <strong>{notificationPermission}</strong></span>{notificationPermission !== "granted" && notificationPermission !== "unsupported" && <button type="button" className="secondary-button" onClick={onRequestNotifications}>Enable desktop notifications</button>}</div>
+        <fieldset disabled={notificationPermission !== "granted"}><legend>Notification types</legend>
+          <label><input type="checkbox" checked={controls.preferences.notifications.enabled} onChange={(event) => updateNotifications({ enabled: event.target.checked })} />Notifications enabled</label>
+          <label><input type="checkbox" checked={controls.preferences.notifications.blocked} onChange={(event) => updateNotifications({ blocked: event.target.checked })} />Blocked agents</label>
+          <label><input type="checkbox" checked={controls.preferences.notifications.completed} onChange={(event) => updateNotifications({ completed: event.target.checked })} />Completed agents</label>
+          <label><input type="checkbox" checked={controls.preferences.notifications.error} onChange={(event) => updateNotifications({ error: event.target.checked })} />Agent errors</label>
+        </fieldset>
+        <details><summary>Provider and project controls · this session only</summary>
+          <p className="hint">Scopes accumulate as they are observed in this session and remain in memory. Project enumeration may be incomplete until agent-host exposes safe public facets.</p>
+          <div className="notification-scopes"><fieldset><legend>Providers</legend>{providers.map((provider) => <label key={provider}><input type="checkbox" checked={!mutedProviders.has(provider)} onChange={() => onToggleProvider(provider)} />{provider}</label>)}</fieldset><fieldset><legend>Projects</legend>{projects.map((project) => <label key={project}><input type="checkbox" checked={!mutedProjects.has(project)} onChange={() => onToggleProject(project)} />{project}</label>)}</fieldset></div>
+        </details>
       </section>
       <section className="settings-card" aria-labelledby="connection-settings-heading">
         <div><p className="eyebrow">Connection</p><h2 id="connection-settings-heading">Local agent-host</h2></div>
         <dl><div><dt>Endpoint</dt><dd className="mono">{controls.preferences.endpoint}</dd></div><div><dt>Credential</dt><dd>Memory only · cleared on disconnect or reload</dd></div></dl>
         <button className="danger-button" type="button" onClick={controls.onReconnect}>Change connection</button>
       </section>
+      <section className="settings-card"><div><p className="eyebrow">Keyboard-first operation</p><h2>Shortcuts</h2></div><dl><div><dt className="mono">/</dt><dd>Focus agent search from the workspace</dd></div><div><dt>Tab / Shift+Tab</dt><dd>Move through semantic controls and explicit action review</dd></div></dl></section>
     </main>
   );
 }
@@ -316,12 +349,41 @@ function PrivacySurface({ onWorkspace, onClear }: { readonly onWorkspace: () => 
       <header className="settings-heading"><div><p className="eyebrow">Local data boundary</p><h1>Privacy</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
       <section className="settings-card privacy-card">
         <LockKeyhole aria-hidden="true" />
-        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, and saved view names may be stored locally. Credentials, prompt drafts, commands, cwd values, raw JSON, and agent snapshots are never persisted.</p></div>
+        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, saved view names, and global notification-type toggles may be stored locally. Credentials, provider/project scopes, recent agents, action history, prompt drafts, commands, cwd values, raw JSON, and agent snapshots are never persisted.</p></div>
       </section>
       <section className="settings-card">
         <div><p className="eyebrow">Reset</p><h2>Clear local dashboard data</h2><p>This removes saved views and appearance choices from storage. The current workspace stays in memory until reload; the active credential is cleared when you change connection.</p></div>
         <button className="danger-button" type="button" onClick={onClear}>Clear local preferences</button>
       </section>
+    </main>
+  );
+}
+
+interface RecentAgent {
+  readonly id: string;
+  readonly name: string;
+  readonly provider: string;
+  readonly project?: string;
+  readonly status: AgentStatus;
+}
+
+function ActivitySurface({ recentAgents, actionHistory, onWorkspace, onSelect, onClear }: { readonly recentAgents: readonly RecentAgent[]; readonly actionHistory: readonly DashboardActionRecord[]; readonly onWorkspace: () => void; readonly onSelect: (agentId: string) => void; readonly onClear: () => void }) {
+  return (
+    <main id="main-content" tabIndex={-1} className="settings-workspace">
+      <header className="settings-heading"><div><p className="eyebrow">Session memory</p><h1>Activity</h1></div><div className="surface-actions"><button className="secondary-button" type="button" onClick={onClear}>Clear session activity</button><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></div></header>
+      <section className="settings-card" aria-labelledby="recent-heading"><div><p className="eyebrow">Recently inspected</p><h2 id="recent-heading">Recent agents</h2><p>Kept only for this browser session.</p></div><ol className="activity-list">{recentAgents.length ? recentAgents.map((agent) => <li key={agent.id}><button type="button" onClick={() => onSelect(agent.id)}><span><strong>{agent.name}</strong><small>{agent.provider}{agent.project ? ` · ${agent.project}` : ""}</small></span><StatusBadge status={agent.status} /></button></li>) : <li className="empty-state">No agents inspected yet.</li>}</ol></section>
+      <section className="settings-card" aria-labelledby="history-heading"><div><p className="eyebrow">Explicit operations</p><h2 id="history-heading">Action history</h2><p>Prompt text, commands, approval payloads, and error bodies are excluded.</p></div><ol className="activity-list action-history">{actionHistory.length ? actionHistory.map((entry) => <li key={entry.id}><div><span><strong>{entry.kind}</strong> · {entry.agentName}</span><small className="mono">{entry.occurredAt} · {entry.outcome}{entry.errorCode ? ` · ${entry.errorCode}` : ""}</small></div></li>) : <li className="empty-state">No actions performed in this session.</li>}</ol></section>
+    </main>
+  );
+}
+
+function DiagnosticsSurface({ model, onWorkspace }: { readonly model: ReturnType<typeof useDashboard>; readonly onWorkspace: () => void }) {
+  return (
+    <main id="main-content" tabIndex={-1} className="settings-workspace">
+      <header className="settings-heading"><div><p className="eyebrow">Public boundary health</p><h1>Diagnostics</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
+      <section className="settings-card diagnostics-grid" aria-labelledby="protocol-heading"><div><p className="eyebrow">Compatibility</p><h2 id="protocol-heading">Versioned API</h2></div><dl><div><dt>API version</dt><dd>{model.apiInfo?.apiVersion ?? "Discovering"}</dd></div><div><dt>Server version</dt><dd>{model.apiInfo?.serverVersion ?? "Not reported"}</dd></div><div><dt>Features</dt><dd>{model.apiInfo?.features.join(", ") || "None reported"}</dd></div></dl></section>
+      <section className="settings-card diagnostics-grid"><div><p className="eyebrow">Live state</p><h2>Connection and revision</h2></div><dl><div><dt>Connection</dt><dd>{model.connection.status}</dd></div><div><dt>Revision</dt><dd>{model.snapshot?.revision ?? model.connection.revision ?? "—"}</dd></div><div><dt>Buffered events</dt><dd>{model.events.length}</dd></div><div><dt>Adapter health</dt><dd>{model.health.map((adapter) => `${adapter.label}: ${adapter.status}`).join(" · ") || "No adapters reported"}</dd></div></dl></section>
+      <section className="settings-card privacy-card"><LockKeyhole aria-hidden="true" /><div><h2>Sanitized diagnostics only</h2><p>No credential, prompt, command, cwd, raw agent JSON, private error body, or provider-native metadata is included on this screen.</p></div></section>
     </main>
   );
 }
@@ -338,12 +400,27 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
     ...(dailyDriver ? { initialQuery: { text: "", ...dailyDriver.preferences.query }, onQueryChange } : {}),
   });
   const [scenario, setScenario] = useState<DemoScenario>("live");
-  const [surface, setSurface] = useState<"workspace" | "settings" | "privacy">("workspace");
+  const [surface, setSurface] = useState<"workspace" | "settings" | "activity" | "diagnostics" | "privacy">("workspace");
+  const [notificationPermission, setNotificationPermission] = useState<DashboardNotificationPermission>(() => dailyDriver?.notificationGateway.permission() ?? "unsupported");
+  const [mutedProviders, setMutedProviders] = useState<ReadonlySet<string>>(() => new Set());
+  const [mutedProjects, setMutedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [recentAgents, setRecentAgents] = useState<readonly RecentAgent[]>([]);
+  const [observedProviders, setObservedProviders] = useState<ReadonlySet<string>>(() => new Set());
+  const [observedProjects, setObservedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const seenNotificationEvents = useRef(new Set<string>());
+  const searchRef = useRef<HTMLInputElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const previousSurface = useRef(surface);
   const displayConnection = scenarioStates[scenario] ?? model.connection;
   const displayError = model.error === displayConnection.reason ? undefined : model.error;
   const metrics = statusMetrics(model.snapshot);
   const providers = providerMetrics(model.snapshot);
   const currentTime = now();
+
+  const notificationProviders = useMemo(() => [...observedProviders].sort(), [observedProviders]);
+  const notificationProjects = useMemo(() => [...observedProjects].sort(), [observedProjects]);
+
+  const rememberAgent = (agent: RecentAgent) => setRecentAgents((current) => [agent, ...current.filter((candidate) => candidate.id !== agent.id)].slice(0, 12));
 
   useEffect(() => {
     if (scenario !== "blocked" && scenario !== "error") return;
@@ -354,6 +431,74 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
     const match = model.snapshot?.agents.find((agent) => agent.status === scenario);
     if (match && model.selectedId !== match.id) model.select(match.id);
   }, [model.query, model.select, model.selectedId, model.setQuery, model.snapshot?.agents, scenario]);
+
+  useEffect(() => {
+    const agents = [
+      ...(model.snapshot?.agents ?? []),
+      ...model.events.flatMap((event) => event.type === "agent.upserted" ? [event.agent] : []),
+    ];
+    setObservedProviders((current) => new Set([...current, ...Object.keys(model.snapshot?.facets?.byProvider ?? {}), ...agents.map((agent) => agent.provider)]));
+    setObservedProjects((current) => new Set([...current, ...agents.flatMap((agent) => agent.project ? [agent.project] : [])]));
+  }, [model.events, model.snapshot?.agents, model.snapshot?.facets?.byProvider]);
+
+  useEffect(() => {
+    for (const event of [...model.notificationEvents].reverse()) {
+      const subject = event.type === "agent.upserted" ? event.agent.id : event.type === "agent.removed" || event.type === "action.completed" ? event.agentId : event.type === "adapter.health" ? event.adapter.id : "host";
+      const key = `${event.revision}:${event.type}:${subject}`;
+      if (seenNotificationEvents.current.has(key)) continue;
+      seenNotificationEvents.current.add(key);
+      const notification = notificationFromEvent(event);
+      if (!dailyDriver || notificationPermission !== "granted" || !notification || !shouldNotify(notification, dailyDriver.preferences.notifications, mutedProviders, mutedProjects)) continue;
+      const label = notification.kind === "completed" ? "completed" : `is ${notification.kind}`;
+      const publicCoordinationKey = `${event.revision}:${notification.kind}`;
+      void dailyDriver.notificationCoordinator.runOnce(publicCoordinationKey, () => dailyDriver.notificationGateway.show(`${notification.agentName} ${label}`, {
+        body: [notification.provider, notification.project].filter(Boolean).join(" · "),
+        tag: publicCoordinationKey,
+      }, () => {
+        void client.detail(notification.agentId).then((detail) => {
+          rememberAgent(detail);
+          model.select(notification.agentId);
+          setSurface("workspace");
+        }).catch(() => undefined);
+      }));
+    }
+    if (seenNotificationEvents.current.size > 500) seenNotificationEvents.current = new Set([...seenNotificationEvents.current].slice(-250));
+  }, [dailyDriver, model.notificationEvents, mutedProjects, mutedProviders, notificationPermission]);
+
+  const requestNotifications = () => {
+    if (!dailyDriver) return;
+    void dailyDriver.notificationGateway.requestPermission().then((permission) => {
+      setNotificationPermission(permission);
+      if (permission === "granted") dailyDriver.onPreferencesChange((current) => ({ ...current, notifications: { ...current.notifications, enabled: true } }));
+    });
+  };
+
+  const toggleScope = (setter: (value: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => void, value: string) => setter((current) => {
+    const next = new Set(current);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  });
+
+  const goWorkspace = () => setSurface("workspace");
+
+  useEffect(() => {
+    if (surface === "workspace" && previousSurface.current !== "workspace") workspaceRef.current?.focus();
+    previousSurface.current = surface;
+  }, [surface]);
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      const target = event.target;
+      const editable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
+      if (surface === "workspace" && event.key === "/" && !editable) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", focusSearch);
+    return () => document.removeEventListener("keydown", focusSearch);
+  }, [surface]);
 
   const rawPublicJson = useMemo(
     () => JSON.stringify(model.detail ? { ...model.detail, publicData: model.detail.publicData ?? {} } : null, null, 2),
@@ -387,7 +532,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
           if (dailyDriver && (displayConnection.status === "unauthorized" || displayConnection.status === "incompatible")) dailyDriver.onTerminalFailure();
           else void model.refresh();
         }} />
-        {dailyDriver && <nav className="utility-nav" aria-label="Dashboard sections"><button type="button" aria-current={surface === "workspace" ? "page" : undefined} onClick={() => setSurface("workspace")}><LayoutDashboard />Workspace</button><button type="button" aria-current={surface === "settings" ? "page" : undefined} onClick={() => setSurface("settings")}><Settings />Settings</button><button type="button" aria-current={surface === "privacy" ? "page" : undefined} onClick={() => setSurface("privacy")}><LockKeyhole />Privacy</button></nav>}
+        {dailyDriver && <nav className="utility-nav" aria-label="Dashboard sections"><button type="button" aria-current={surface === "workspace" ? "page" : undefined} onClick={goWorkspace}><LayoutDashboard />Workspace</button><button type="button" aria-current={surface === "activity" ? "page" : undefined} onClick={() => setSurface("activity")}><Clock3 />Activity</button><button type="button" aria-current={surface === "diagnostics" ? "page" : undefined} onClick={() => setSurface("diagnostics")}><Stethoscope />Diagnostics</button><button type="button" aria-current={surface === "settings" ? "page" : undefined} onClick={() => setSurface("settings")}><Settings />Settings</button><button type="button" aria-current={surface === "privacy" ? "page" : undefined} onClick={() => setSurface("privacy")}><LockKeyhole />Privacy</button></nav>}
         {showDemoControls && <label className="scenario-control">
           <span>Demo state</span>
           <select value={scenario} onChange={(event) => setScenario(event.target.value as DemoScenario)}>
@@ -403,8 +548,10 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       </header>
       {dailyDriver?.environmentNotice && <div className="environment-notice" role="status"><ShieldAlert aria-hidden="true" />{dailyDriver.environmentNotice}</div>}
 
-      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={() => setSurface("workspace")} />}
-      {surface === "privacy" && dailyDriver && <PrivacySurface onWorkspace={() => setSurface("workspace")} onClear={dailyDriver.onClearPreferences} />}
+      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={(provider) => toggleScope(setMutedProviders, provider)} onToggleProject={(project) => toggleScope(setMutedProjects, project)} />}
+      {surface === "activity" && dailyDriver && <ActivitySurface recentAgents={recentAgents} actionHistory={model.actionHistory} onWorkspace={goWorkspace} onSelect={(agentId) => { model.select(agentId); goWorkspace(); }} onClear={() => { setRecentAgents([]); model.clearActionHistory(); }} />}
+      {surface === "diagnostics" && dailyDriver && <DiagnosticsSurface model={model} onWorkspace={goWorkspace} />}
+      {surface === "privacy" && dailyDriver && <PrivacySurface onWorkspace={goWorkspace} onClear={dailyDriver.onClearPreferences} />}
       <div hidden={surface !== "workspace"}>
         <section className="summary-strip" aria-labelledby="summary-heading">
         <div className="total-metric"><p className="eyebrow" id="summary-heading">Current scope</p><strong>{model.snapshot?.total?.toLocaleString() ?? "—"}</strong><span>agents</span></div>
@@ -416,12 +563,12 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
         <div className="adapter-summary"><HeartPulse aria-hidden="true" /><div><strong>{model.health.filter((item) => item.status === "healthy").length}/{model.health.length}</strong><span>adapters healthy</span></div></div>
       </section>
 
-      <main id={surface === "workspace" ? "main-content" : undefined} tabIndex={-1} className="workspace">
+      <main ref={workspaceRef} id={surface === "workspace" ? "main-content" : undefined} tabIndex={-1} className="workspace">
         <section className="agent-rail panel" aria-labelledby="agents-heading">
           <div className="rail-heading"><div><p className="eyebrow">Attention queue</p><h1 id="agents-heading">Agents</h1></div><button type="button" className="icon-button" onClick={() => void model.refresh()} aria-label="Refresh agents"><RefreshCw /></button></div>
           <div className="filters">
             {dailyDriver && <div className="saved-view-row"><label><span>Saved view</span><select defaultValue="" onChange={(event) => { const view = dailyDriver.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) model.setQuery({ text: "", status: view.status, provider: view.provider, sort: view.sort }); }}><option value="">Current filters</option>{dailyDriver.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><button type="button" onClick={saveCurrentView}>Save view</button></div>}
-            <label className="search-field"><span className="visually-hidden">Search agents</span><Search aria-hidden="true" /><input value={model.query.text} onChange={(event) => model.setQuery(updateQuery(model.query, { text: event.target.value }))} placeholder="Search agents" /></label>
+            <label className="search-field"><span className="visually-hidden">Search agents</span><Search aria-hidden="true" /><input ref={searchRef} aria-keyshortcuts="/" value={model.query.text} onChange={(event) => model.setQuery(updateQuery(model.query, { text: event.target.value }))} placeholder="Search agents" /></label>
             <div className="filter-row">
               <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{metric.status}</option>)}</select></label>
               <label><span>Provider</span><select value={model.query.provider} onChange={(event) => model.setQuery(updateQuery(model.query, { provider: event.target.value }))}><option value="">All</option>{providers.map(([provider]) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
@@ -442,7 +589,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
           <ul className="agent-list">
             {model.snapshot?.agents.map((agent) => (
               <li key={agent.id}>
-                <button type="button" className={`agent-row ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => model.select(agent.id)} aria-current={agent.id === model.selectedId ? "true" : undefined}>
+                <button type="button" className={`agent-row ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => { rememberAgent(agent); model.select(agent.id); }} aria-current={agent.id === model.selectedId ? "true" : undefined}>
                   <span className="agent-row-top"><strong>{agent.name}</strong><StatusBadge status={agent.status} /></span>
                   <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span>{agent.project ?? "No project"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
                 </button>

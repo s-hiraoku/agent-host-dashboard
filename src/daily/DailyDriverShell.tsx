@@ -2,6 +2,7 @@ import { KeyRound, LockKeyhole, RotateCcw, Server, ShieldAlert, WifiOff } from "
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { App } from "../App.js";
 import { normalizeAgentHostBaseUrl } from "../http/fetch-channel.js";
+import { BrowserNotificationCoordinator, BrowserNotificationGateway, type NotificationCoordinator, type NotificationGateway } from "./notifications.js";
 import { defaultPreferences, type DashboardPreferences, type PreferenceStore } from "./preferences.js";
 import {
   MemoryCredentialVault,
@@ -18,15 +19,17 @@ const failureCopy: Record<SessionFailure, { readonly icon: ReactNode; readonly t
   error: { icon: <ShieldAlert aria-hidden="true" />, title: "Connection could not be opened", guidance: "Review the endpoint and retry. No credential was retained." },
 };
 
-export function DailyDriverShell({ connector, preferenceStore, environmentNotice }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string }) {
+export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator }) {
   const [preferences, setPreferences] = useState(() => preferenceStore.load());
   const [lease, setLease] = useState<ClientLease>();
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [failure, setFailure] = useState<{ readonly kind: SessionFailure; readonly message: string }>();
   const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
+  const [activeNotificationCoordinator, setActiveNotificationCoordinator] = useState<NotificationCoordinator | undefined>(() => notificationCoordinator);
   const formRef = useRef<HTMLFormElement>(null);
   const activeCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
+  const notifications = useRef(notificationGateway ?? new BrowserNotificationGateway());
   const leaseRef = useRef<ClientLease | undefined>(undefined);
   const activeEndpoint = useRef<string | undefined>(undefined);
   const attempt = useRef<{ readonly generation: number; readonly controller: AbortController; readonly vault?: MemoryCredentialVault }>({ generation: 0, controller: new AbortController() });
@@ -41,6 +44,16 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     leaseRef.current?.close();
     activeCredentialVault.current?.clear();
   }, []);
+
+  useEffect(() => {
+    if (notificationCoordinator) {
+      setActiveNotificationCoordinator(notificationCoordinator);
+      return;
+    }
+    const coordinator = new BrowserNotificationCoordinator();
+    setActiveNotificationCoordinator(coordinator);
+    return () => coordinator.close();
+  }, [notificationCoordinator]);
 
   const updatePreferences = (update: DashboardPreferences | ((current: DashboardPreferences) => DashboardPreferences)) => {
     setPreferences((current) => {
@@ -154,7 +167,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
+      {lease && activeNotificationCoordinator && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,
@@ -164,6 +177,8 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
           setPreferences(defaultPreferences);
         },
         ...(environmentNotice ? { environmentNotice } : {}),
+        notificationGateway: notifications.current,
+        notificationCoordinator: activeNotificationCoordinator,
       }} /></div>}
       {showOnboarding && <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">
