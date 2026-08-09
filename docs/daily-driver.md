@@ -47,8 +47,9 @@ Desktop notification permission is requested only from the Settings button. The
 dashboard never notifies for initial snapshots or revision-gap resync snapshots;
 only subsequent `agent.upserted` events entering blocked, done, or error states are
 eligible. Unknown prior states are suppressed rather than guessed. A session-only
-cross-tab election shares only revision and transition kind, preventing duplicate
-delivery without broadcasting agent data. Notification clicks revalidate the agent
+cross-tab election shares only a truncated SHA-256 endpoint namespace, revision, and
+transition kind, preventing duplicate delivery across tabs on the same host without
+broadcasting the endpoint or agent data. Notification clicks revalidate the agent
 through the public client before returning focus to the workspace. Global event-type
 toggles persist, while provider/project scopes remain in memory. The Activity
 surface keeps at most 12 recent agents and 100 action
