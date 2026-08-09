@@ -131,6 +131,12 @@ test("recovers from an SSE reconnect and a revision-gap resync", async ({ page }
   await expect(page.getByText("Live connection")).toBeVisible({ timeout: 5_000 });
   await expect(page.getByText("Resynchronized live agent")).toBeVisible();
   await expect(page.getByText("r43", { exact: true })).toBeVisible();
+
+  await page.goto("/?fixture=terminal-retry");
+  await expect(page.getByText("Host disconnected")).toBeVisible();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("Live connection")).toBeVisible();
+  await expect(page.getByText("r41", { exact: true })).toBeVisible();
 });
 
 test("renders authorization, incompatibility, adapter, and error recovery states", async ({ page }) => {

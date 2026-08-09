@@ -53,6 +53,16 @@ function createFixtureClient(mode: string): DefaultAgentHostClient {
       yield { type: "heartbeat", revision: 41 };
       await holdUntilAbort(options.signal);
     };
+  } else if (mode === "terminal-retry") {
+    let streamAttempt = 0;
+    transport.events = async function* terminalRetryEvents(options): AsyncIterable<AgentEvent> {
+      streamAttempt += 1;
+      if (streamAttempt === 1) {
+        throw new AgentHostError("invalid_response", "The demo stream returned an invalid response.");
+      }
+      yield { type: "heartbeat", revision: 41 };
+      await holdUntilAbort(options.signal);
+    };
   } else if (mode === "gap") {
     let streamAttempt = 0;
     const snapshotRequest = transport.snapshot.bind(transport);

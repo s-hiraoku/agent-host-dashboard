@@ -48,6 +48,7 @@ export interface DashboardModel {
   nextPage(): void;
   previousPage(): void;
   refresh(): Promise<void>;
+  reconnect(): void;
   perform(target: AgentDetail, action: AgentAction): Promise<AgentActionResult>;
   clearActionHistory(): void;
 }
@@ -110,12 +111,15 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const [operationError, setOperationError] = useState<string>();
   const [actionResult, setActionResult] = useState<AgentActionResult>();
   const [actionHistory, setActionHistory] = useState<readonly DashboardActionRecord[]>([]);
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
   const actionSequence = useRef(0);
   const queryRef = useRef(query);
   const cursorRef = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
   const requestController = useRef<AbortController | undefined>(undefined);
   const eventBuffer = useRef<readonly AgentEvent[]>([]);
+  const visibleAgentIds = useRef(new Set<string>());
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const knownStatuses = useRef(new Map<string, AgentStatus>());
   const snapshotReady = useRef(false);
 
@@ -139,6 +143,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         (agent) => matchesQuery(agent, queryRef.current),
       );
       setSnapshot(reconciledSnapshot);
+      visibleAgentIds.current = new Set(reconciledSnapshot.agents.map((agent) => agent.id));
       for (const agent of reconciledSnapshot.agents) knownStatuses.current.set(agent.id, agent.status);
       snapshotReady.current = true;
       setApiInfo(nextApiInfo);
@@ -153,7 +158,18 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
     }
   }, [client]);
 
-  useEffect(() => () => requestController.current?.abort(), []);
+  useEffect(() => () => {
+    requestController.current?.abort();
+    if (reloadTimer.current !== undefined) clearTimeout(reloadTimer.current);
+  }, []);
+
+  const scheduleReload = useCallback(() => {
+    if (reloadTimer.current !== undefined) return;
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = undefined;
+      void load();
+    }, 0);
+  }, [load]);
 
   useEffect(() => {
     let active = true;
@@ -174,6 +190,10 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       onEvent: (event) => {
         if (!active) return;
         if (event.type === "agent.upserted") {
+          const matches = matchesQuery(event.agent, queryRef.current);
+          const visible = visibleAgentIds.current.has(event.agent.id);
+          if (!visible && matches) scheduleReload();
+          else if (visible && !matches) visibleAgentIds.current.delete(event.agent.id);
           const previousStatus = knownStatuses.current.get(event.agent.id);
           knownStatuses.current.set(event.agent.id, event.agent.status);
           const attentionStatus = event.agent.status === "blocked" || event.agent.status === "done" || event.agent.status === "error";
@@ -182,6 +202,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
           }
         } else if (event.type === "agent.removed") {
           knownStatuses.current.delete(event.agentId);
+          visibleAgentIds.current.delete(event.agentId);
         }
         eventBuffer.current = [...eventBuffer.current, event].slice(-500);
         setEvents((current) => [event, ...current].slice(0, 100));
@@ -200,7 +221,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       active = false;
       hostConnection.close();
     };
-  }, [client, load]);
+  }, [client, connectionGeneration, load, scheduleReload]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -298,6 +319,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       nextPage,
       previousPage,
       refresh: load,
+      reconnect: () => setConnectionGeneration((current) => current + 1),
       perform,
       clearActionHistory: () => setActionHistory([]),
     }),

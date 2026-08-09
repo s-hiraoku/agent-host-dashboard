@@ -177,6 +177,44 @@ describe("evaluation dashboard", () => {
     expect(screen.getByText("Detail is unavailable.")).toBeInTheDocument();
   });
 
+  it("restarts a terminally disconnected event connection", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.eventStreams = [
+      new AgentHostError("invalid_response", "The event stream was invalid."),
+      [{ type: "heartbeat", revision: 41 }],
+    ];
+    const { user } = renderDashboard(transport);
+
+    expect(await screen.findByText("Host disconnected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByText("Live connection")).toBeInTheDocument());
+    expect(await screen.findByText("r41")).toBeInTheDocument();
+  });
+
+  it("reloads the bounded page when a matching unseen agent is upserted", async () => {
+    let releaseEvent: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvent = resolve; });
+    const unseen = {
+      ...createLargeDemoSnapshot().agents[60]!,
+      id: "demo:new-attention-agent",
+      name: "New attention agent",
+      status: "blocked" as const,
+    };
+    transport.eventStreams = [[{ type: "agent.upserted", revision: 41, agent: unseen }]];
+    renderDashboard(transport);
+    await screen.findByText("50 shown of 1000");
+    transport.currentSnapshot = {
+      ...transport.currentSnapshot,
+      agents: [unseen, ...transport.currentSnapshot.agents],
+      total: transport.currentSnapshot.total! + 1,
+    };
+
+    releaseEvent();
+    expect(await screen.findByRole("button", { name: /New attention agent/ })).toBeInTheDocument();
+    expect(screen.getByText("50 shown of 1001")).toBeInTheDocument();
+  });
+
   it("preserves an unsent draft across an SSE reconnect", async () => {
     let releaseStream: () => void = () => undefined;
     const transport = new MockAgentHostTransport();

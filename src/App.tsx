@@ -531,6 +531,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
         <div className="brand"><Server aria-hidden="true" /><div><span>Agent Host</span><strong>Console</strong></div></div>
         <ConnectionBanner state={displayConnection} onRetry={() => {
           if (dailyDriver && (displayConnection.status === "unauthorized" || displayConnection.status === "incompatible")) dailyDriver.onTerminalFailure();
+          else if (displayConnection.status === "disconnected") model.reconnect();
           else void model.refresh();
         }} />
         {dailyDriver && <nav className="utility-nav" aria-label="Dashboard sections"><button type="button" aria-current={surface === "workspace" ? "page" : undefined} onClick={goWorkspace}><LayoutDashboard />Workspace</button><button type="button" aria-current={surface === "activity" ? "page" : undefined} onClick={() => setSurface("activity")}><Clock3 />Activity</button><button type="button" aria-current={surface === "diagnostics" ? "page" : undefined} onClick={() => setSurface("diagnostics")}><Stethoscope />Diagnostics</button><button type="button" aria-current={surface === "settings" ? "page" : undefined} onClick={() => setSurface("settings")}><Settings />Settings</button><button type="button" aria-current={surface === "privacy" ? "page" : undefined} onClick={() => setSurface("privacy")}><LockKeyhole />Privacy</button></nav>}
