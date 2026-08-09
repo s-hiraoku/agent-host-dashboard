@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist-client/index.js",
+  "types": "./dist-client/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist-client/index.d.ts",
+      "import": "./dist-client/index.js"
     }
   },
   "engines": {
@@ -18,7 +18,7 @@
     "build": "npm run build:types && vite build",
     "build:types": "tsc -p tsconfig.build.json",
     "check": "npm run typecheck && npm test && npm run build",
-    "smoke:package": "node -e \"import('./dist/index.js')\"",
+    "smoke:package": "node -e \"import('./dist-client/index.js')\"",
     "dev": "vite",
     "preview": "vite preview",
     "test": "vitest run",
