@@ -53,10 +53,46 @@ Requires Node.js 22 or newer.
 
 ```bash
 npm install
+npm run dev
 npm run check
 ```
 
-`npm run check` runs strict type checking, unit tests, and the production library build.
+The development server starts the dashboard with the deterministic 1,000-agent
+fixture. Use the **Demo state** control to reproduce live, blocked, error,
+disconnected, stale, unauthorized, and incompatible states without a running
+host. The UI paginates the fixture in bounded 50-agent pages rather than
+mounting all records in the DOM.
+
+`npm run check` runs strict type checking, unit tests, and the production
+dashboard and client-module build.
+
+### Connecting a local host
+
+The browser always calls the same-origin `/agent-host` path. During development,
+Vite can proxy that path to a loopback host:
+
+```bash
+AGENT_HOST_URL=http://127.0.0.1:9417 npm run dev
+```
+
+If the confirmed backend authentication contract requires a bearer token, pass
+it only to the server-side development process with `AGENT_HOST_TOKEN`. Vite
+injects the header while proxying; it is never compiled into browser assets or
+written to browser storage. The production app still requires a confirmed
+`AgentHostWireProtocol` implementation before it can connect to agent-host.
+
+## Dashboard interaction model
+
+The main workspace keeps provider-neutral operational context visible: status,
+capabilities, working directory, source, last activity, adapter health, and the
+semantic live event stream. Raw public API JSON is isolated in a collapsed
+developer panel.
+
+Actions are capability-gated. Prompt, interrupt, approve, and reject operations
+open a contextual confirmation showing the exact target and working directory.
+Approval requests also show their reason, command, or file path. Enter and
+Escape never act as semantic approval or rejection; users must choose the
+explicit action button.
 
 ## Fixtures
 
