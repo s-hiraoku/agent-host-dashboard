@@ -24,9 +24,11 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [failure, setFailure] = useState<{ readonly kind: SessionFailure; readonly message: string }>();
+  const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const activeCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
   const leaseRef = useRef<ClientLease | undefined>(undefined);
+  const activeEndpoint = useRef<string | undefined>(undefined);
   const attempt = useRef<{ readonly generation: number; readonly controller: AbortController; readonly vault?: MemoryCredentialVault }>({ generation: 0, controller: new AbortController() });
 
   useEffect(() => {
@@ -51,6 +53,20 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const resetConnection = () => {
     attempt.current.controller.abort();
     attempt.current.vault?.clear();
+    setShowOnboarding(true);
+    setConnecting(false);
+    setFailure(undefined);
+  };
+
+  const resetFailedConnection = () => {
+    attempt.current.controller.abort();
+    attempt.current.vault?.clear();
+    leaseRef.current?.close();
+    leaseRef.current = undefined;
+    activeCredentialVault.current?.clear();
+    activeCredentialVault.current = undefined;
+    activeEndpoint.current = undefined;
+    setLease(undefined);
     setShowOnboarding(true);
     setConnecting(false);
     setFailure(undefined);
@@ -118,6 +134,10 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
       activeCredentialVault.current?.clear();
       activeCredentialVault.current = attemptVault;
       attempt.current = { generation, controller };
+      if (activeEndpoint.current !== undefined && activeEndpoint.current !== baseUrl) {
+        setWorkspaceGeneration((current) => current + 1);
+      }
+      activeEndpoint.current = baseUrl;
       updatePreferences((current) => ({ ...current, endpoint: baseUrl }));
       setLease(openedLease);
       setShowOnboarding(false);
@@ -134,10 +154,11 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && <div hidden={showOnboarding}><App client={lease.client} showDemoControls={false} dailyDriver={{
+      {lease && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,
+        onTerminalFailure: resetFailedConnection,
         onClearPreferences: () => {
           preferenceStore.clear();
           setPreferences(defaultPreferences);

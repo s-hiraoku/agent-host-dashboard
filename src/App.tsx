@@ -286,6 +286,7 @@ export interface DailyDriverControls {
   readonly preferences: DashboardPreferences;
   readonly onPreferencesChange: (update: DashboardPreferences | ((current: DashboardPreferences) => DashboardPreferences)) => void;
   readonly onReconnect: () => void;
+  readonly onTerminalFailure: () => void;
   readonly onClearPreferences: () => void;
   readonly environmentNotice?: string;
 }
@@ -383,7 +384,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       <header className="topbar">
         <div className="brand"><Server aria-hidden="true" /><div><span>Agent Host</span><strong>Console</strong></div></div>
         <ConnectionBanner state={displayConnection} onRetry={() => {
-          if (dailyDriver && (displayConnection.status === "unauthorized" || displayConnection.status === "incompatible")) dailyDriver.onReconnect();
+          if (dailyDriver && (displayConnection.status === "unauthorized" || displayConnection.status === "incompatible")) dailyDriver.onTerminalFailure();
           else void model.refresh();
         }} />
         {dailyDriver && <nav className="utility-nav" aria-label="Dashboard sections"><button type="button" aria-current={surface === "workspace" ? "page" : undefined} onClick={() => setSurface("workspace")}><LayoutDashboard />Workspace</button><button type="button" aria-current={surface === "settings" ? "page" : undefined} onClick={() => setSurface("settings")}><Settings />Settings</button><button type="button" aria-current={surface === "privacy" ? "page" : undefined} onClick={() => setSurface("privacy")}><LockKeyhole />Privacy</button></nav>}

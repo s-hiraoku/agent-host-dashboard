@@ -104,6 +104,61 @@ describe("daily-driver shell", () => {
     expect(screen.getByRole("button", { name: /Sanitized agent 0001/ })).toHaveAttribute("aria-current", "true");
   });
 
+  it("resets host-scoped selection and drafts when the canonical endpoint changes", async () => {
+    let calls = 0;
+    const connector: ClientConnector = {
+      async open() {
+        calls += 1;
+        if (calls === 1) return fixtureLease();
+        const transport = new MockAgentHostTransport();
+        transport.holdEventStreams = true;
+        return { client: new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] }), close() {} };
+      },
+    };
+    const user = userEvent.setup();
+    render(<DailyDriverShell connector={connector} preferenceStore={new MemoryPreferenceStore()} />);
+    await user.click(screen.getByRole("button", { name: "Connect securely" }));
+    await user.selectOptions(await screen.findByLabelText("Status"), "working");
+    await user.click(await screen.findByRole("button", { name: /Sanitized agent 0001/ }));
+    await user.type(await screen.findByLabelText("Prompt"), "Must not cross hosts");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Change connection" }));
+    await user.clear(screen.getByLabelText("Agent-host endpoint"));
+    await user.type(screen.getByLabelText("Agent-host endpoint"), "http://127.0.0.1:9000");
+    await user.click(screen.getByRole("button", { name: "Connect securely" }));
+
+    expect(await screen.findByRole("heading", { name: "Review orbital parser" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Prompt")).toHaveValue("");
+    expect(screen.queryByText("Sanitized agent 0001")).not.toBeInTheDocument();
+  });
+
+  it("disposes the active lease and credential after a terminal session failure", async () => {
+    let releaseStream: () => void = () => undefined;
+    const close = vi.fn();
+    let credential: (() => string | undefined) | undefined;
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseStream = resolve; });
+    transport.eventStreams = [new AgentHostError("unauthorized", "Session credential expired.")];
+    const connector: ClientConnector = {
+      async open(input) {
+        credential = input.credential;
+        return { client: new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] }), close };
+      },
+    };
+    const user = userEvent.setup();
+    render(<DailyDriverShell connector={connector} preferenceStore={new MemoryPreferenceStore()} />);
+    await user.type(screen.getByLabelText(/Access token/), "expired-session-secret");
+    await user.click(screen.getByRole("button", { name: "Connect securely" }));
+    expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();
+    releaseStream();
+    await user.click(await screen.findByRole("button", { name: "Review connection" }));
+
+    expect(await screen.findByRole("heading", { name: "Connect to your local agent-host" })).toBeInTheDocument();
+    expect(credential?.()).toBeUndefined();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("closes a superseded lease returned by a cancelled slow open and clears its credential", async () => {
     const first = deferred<ClientLease>();
     const staleClose = vi.fn();
