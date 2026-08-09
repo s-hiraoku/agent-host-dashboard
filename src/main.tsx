@@ -21,4 +21,6 @@ const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root element.");
-createRoot(root).render(<StrictMode><App client={client} /></StrictMode>);
+createRoot(root).render(
+  <StrictMode><App client={client} now={() => Date.parse("2026-01-15T09:31:00.000Z")} /></StrictMode>,
+);

@@ -277,12 +277,13 @@ function updateQuery(query: DashboardQuery, patch: Partial<DashboardQuery>): Das
   return { ...query, ...patch };
 }
 
-export function App({ client }: { readonly client: AgentHostClient }) {
+export function App({ client, now = Date.now }: { readonly client: AgentHostClient; readonly now?: () => number }) {
   const model = useDashboard(client);
   const [scenario, setScenario] = useState<DemoScenario>("live");
   const displayConnection = scenarioStates[scenario] ?? model.connection;
   const metrics = statusMetrics(model.snapshot);
   const providers = providerMetrics(model.snapshot);
+  const currentTime = now();
 
   useEffect(() => {
     if (scenario !== "blocked" && scenario !== "error") return;
@@ -356,7 +357,7 @@ export function App({ client }: { readonly client: AgentHostClient }) {
               <li key={agent.id}>
                 <button type="button" className={`agent-row ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => model.select(agent.id)} aria-current={agent.id === model.selectedId ? "true" : undefined}>
                   <span className="agent-row-top"><strong>{agent.name}</strong><StatusBadge status={agent.status} /></span>
-                  <span className="agent-row-meta"><span>{agent.provider}</span><span>{agent.project ?? "No project"}</span><span>{formatActivity(agent.lastActivityAt, Date.parse("2026-01-15T09:31:00.000Z"))}</span></span>
+                  <span className="agent-row-meta"><span>{agent.provider}</span><span>{agent.project ?? "No project"}</span><span>{formatActivity(agent.lastActivityAt, currentTime)}</span></span>
                 </button>
               </li>
             ))}
@@ -381,7 +382,7 @@ export function App({ client }: { readonly client: AgentHostClient }) {
                 <div><dt>Project</dt><dd>{model.detail.project ?? "Not reported"}</dd></div>
                 <div><dt>Source</dt><dd>{model.detail.provenance.source} · {model.detail.provenance.confidence ?? "unknown"}</dd></div>
                 <div className="wide"><dt>Working directory</dt><dd className="mono">{model.detail.cwd ?? "Not reported"}</dd></div>
-                <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, Date.parse("2026-01-15T09:31:00.000Z"))}</dd></div>
+                <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
               </dl>
               <div className="capability-row"><span className="field-label">Public capabilities</span><div>{agentActions.filter((action) => model.detail?.capabilities[action]).map((action) => <span className="capability" key={action}>{action}</span>)}</div></div>
               <section className="timeline" aria-labelledby="timeline-heading">

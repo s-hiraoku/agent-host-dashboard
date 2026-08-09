@@ -14,7 +14,7 @@ import type {
   AgentSummary,
 } from "../domain.js";
 import { toAgentHostError } from "../errors.js";
-import { applyVisibleEvent } from "./use-cases.js";
+import { applyVisibleEvent, reconcileVisibleEvents } from "./use-cases.js";
 
 const pageSize = 50;
 
@@ -91,6 +91,7 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
   const cursorRef = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
   const requestController = useRef<AbortController | undefined>(undefined);
+  const eventBuffer = useRef<readonly AgentEvent[]>([]);
 
   const load = useCallback(async () => {
     const generation = requestGeneration.current + 1;
@@ -105,7 +106,12 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
         client.adapterHealth({ signal: controller.signal }),
       ]);
       if (generation !== requestGeneration.current) return;
-      setSnapshot(nextSnapshot);
+      const reconciledSnapshot = reconcileVisibleEvents(
+        nextSnapshot,
+        eventBuffer.current,
+        (agent) => matchesQuery(agent, queryRef.current),
+      );
+      setSnapshot(reconciledSnapshot);
       setHealth(nextHealth);
       setError(undefined);
       setSelectedId((current) => current ?? nextSnapshot.agents[0]?.id);
@@ -130,6 +136,7 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
       },
       onEvent: (event) => {
         if (!active) return;
+        eventBuffer.current = [...eventBuffer.current, event].slice(-500);
         setEvents((current) => [event, ...current].slice(0, 100));
         setSnapshot((current) =>
           current ? applyVisibleEvent(current, event, (agent) => matchesQuery(agent, queryRef.current)) : current,

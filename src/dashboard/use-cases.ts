@@ -70,13 +70,29 @@ export function applyVisibleEvent(
     return { ...snapshot, agents, revision: event.revision, ...(facets === undefined ? {} : { facets }) };
   }
   if (event.type === "agent.removed") {
+    const previous = snapshot.agents.find((agent) => agent.id === event.agentId);
+    if (!previous) return { ...snapshot, revision: event.revision };
+    const facets = updateVisibleFacets(snapshot, previous, undefined);
     return {
       ...snapshot,
       agents: snapshot.agents.filter((agent) => agent.id !== event.agentId),
       revision: event.revision,
+      ...(snapshot.total === undefined ? {} : { total: Math.max(0, snapshot.total - 1) }),
+      ...(facets === undefined ? {} : { facets }),
     };
   }
   return { ...snapshot, revision: event.revision };
+}
+
+export function reconcileVisibleEvents(
+  snapshot: AgentSnapshot,
+  events: readonly AgentEvent[],
+  matches: (agent: AgentSummary) => boolean = () => true,
+): AgentSnapshot {
+  return events
+    .filter((event) => event.revision > snapshot.revision)
+    .sort((left, right) => left.revision - right.revision)
+    .reduce((current, event) => applyVisibleEvent(current, event, matches), snapshot);
 }
 
 export function findAttentionAgent(agents: readonly AgentSummary[]): AgentSummary | undefined {

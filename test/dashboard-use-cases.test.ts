@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyVisibleEvent, findAttentionAgent, providerMetrics, statusMetrics } from "../src/dashboard/use-cases.js";
+import {
+  applyVisibleEvent,
+  findAttentionAgent,
+  providerMetrics,
+  reconcileVisibleEvents,
+  statusMetrics,
+} from "../src/dashboard/use-cases.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 
 describe("dashboard use cases", () => {
@@ -42,6 +48,24 @@ describe("dashboard use cases", () => {
 
     expect(updated.agents).not.toContainEqual(expect.objectContaining({ id: target.id }));
     expect(updated.total).toBe(9);
+  });
+
+  it("replays live events over an older snapshot response and updates metadata", () => {
+    const snapshot = {
+      ...createLargeDemoSnapshot(10),
+      facets: { byStatus: { working: 10 }, byProvider: { "demo-alpha": 10 } },
+    };
+    const target = snapshot.agents[0]!;
+    const reconciled = reconcileVisibleEvents(snapshot, [
+      { type: "agent.upserted", revision: 41, agent: { ...target, name: "Live update" } },
+      { type: "agent.removed", revision: 42, agentId: target.id },
+    ]);
+
+    expect(reconciled.revision).toBe(42);
+    expect(reconciled.agents).not.toContainEqual(expect.objectContaining({ id: target.id }));
+    expect(reconciled.total).toBe(9);
+    expect(reconciled.facets?.byStatus.working).toBe(9);
+    expect(reconciled.facets?.byProvider["demo-alpha"]).toBe(9);
   });
 
   it("prioritizes blocked and error agents without provider-specific rules", () => {
