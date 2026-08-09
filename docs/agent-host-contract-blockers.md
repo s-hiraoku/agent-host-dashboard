@@ -1,34 +1,61 @@
-# Agent-host contract blockers
+# Agent-host contract status and blockers
 
-Dashboard development can proceed through the provider-neutral client boundary and sanitized fixtures. Production HTTP/SSE conformance remains blocked until the backend issues below publish and test a versioned public contract.
+Agent-host issues #2, #3, #4, #5, and #6 now publish API v1, adapter health,
+browser-safe bearer authentication, bounded cursor pagination, structured
+errors, sequenced SSE events, and sanitized client-conformance fixtures. The
+dashboard must consume those public artifacts through `AgentHostWireProtocol`;
+fixture/mock tests alone are not wire conformance.
 
-## agent-host #2 — public API and event contract
+## Confirmed client-side work
 
-Required decisions:
+The production codec can implement the following without further backend
+changes:
 
-- version discovery response, compatibility policy, and incompatible-version error/status;
-- bounded list pagination cursor, stable ordering, filter/sort grammar, and snapshot revision;
-- provider-neutral summary, detail, capabilities, approvals, and public-data schemas;
-- structured error envelope with stable code, retryability, request ID, and safe details;
-- SSE event ID/revision, ordering, duplicate semantics, retention, heartbeat, retry, and resume-after-revision;
-- lossless handoff between snapshot revision and the resumed event stream;
-- action requests/results, idempotency, conflicts, and target revision/precondition for prompt, interrupt, approve, and reject;
-- public/private field classification and required redaction.
+- version discovery and explicit API compatibility;
+- provider-neutral list/detail decoding and bounded cursor pagination;
+- provider/status/view/cwd/text filters and the server's fixed ordering;
+- adapter readiness and sanitized failures;
+- bearer authentication through fetch, including fetch-streamed SSE;
+- structured HTTP errors, timeouts, cancellation, and stale-cursor recovery;
+- action payloads and one logical `Idempotency-Key` retained across retries;
+- separate SSE `sequence` ordering and `snapshotRevision` state tracking;
+- authoritative snapshot resync after ready mismatch, sequence gap, clean EOF,
+  or network disconnect.
 
-The snapshot/event handoff must guarantee that an event occurring between snapshot creation and stream subscription is either replayed by `events-after-revision` or detected as a gap. A `/v1` path alone is not a compatibility signal.
+An action's client-generated idempotency key can serve as its local correlation
+ID. The backend does not need to invent an action ID or response revision; the
+dashboard must not fabricate either wire field.
 
-## agent-host #3 — adapter health
+## Remaining backend contract gaps
 
-Required provider-neutral fields: adapter ID/label, starting/healthy/degraded/unavailable state, last attempt, last success, bounded duration, agent count, sanitized error code/message/retryability, and semantic health-change events.
+### Global sorting
 
-## agent-host #4 — browser safety and authentication
+API v1 exposes fixed attention ordering but no sort grammar. Sorting only the
+current page changes the meaning of pagination, while fetching every page is
+unbounded and cannot guarantee a single snapshot revision. The daily-driver UI
+requires an allowlisted server-side sort contract, or an explicit capability
+that lets the UI disable unavailable sort choices without misrepresenting them.
 
-Required decisions: bearer-token bootstrap/rotation, sensitive endpoint coverage, Host/Origin/CORS policy, JSON content-type and body limits, loopback versus remote connection policy, audit event schema, and redacted authorization errors. Browser SSE authentication must support fetch-streaming Authorization headers or define an equally safe non-query alternative.
+### Accurate provider/status summaries
 
-## agent-host #6 — fixtures and conformance
+API v1 returns a filtered total but no provider/status facets. Page-local counts
+must not be labelled as global operational summaries. Repeating filtered list
+requests is non-atomic and scales with the number of providers. The API needs
+revision-consistent facet counts with defined pre-filter/post-filter semantics,
+or an explicit capability that lets the UI mark global summaries unavailable.
 
-Required artifacts: deterministic sanitized snapshot/event/action/error fixtures, a 1,000-agent fixture, reconnect and revision-gap scenarios, schema identifiers, and a reusable conformance command. Fixtures must contain no tokens, local user paths, session content, or provider-native private metadata.
+### Stable public project scope
+
+The v1 summary has provider and source but no classified, stable public project
+identifier. Project-scoped notification preferences therefore remain
+session-only and appear only when a public project value is observed through a
+future compatible contract.
 
 ## Completion rule
 
-The dashboard's fixture/mock tests do not count as agent-host API conformance. Conformance is complete only when the confirmed codec passes the official backend fixtures/suite and the integrated HTTP/SSE tests. Until then the dashboard PR is implementation-complete only on the client-boundary side and carries this backend blocker.
+The next connector PR must run the official agent-host fixtures through the real
+HTTP/SSE codec and cover ready mismatch, repeated snapshot revisions, sequence
+gaps, disconnect resync, unauthorized/incompatible responses, stale cursors,
+action idempotency, timeout, and abort behavior. Dashboard #1-#4 and the
+agent-host #11 dashboard gate cannot be reported complete until that connector
+is integrated and global sort/facet behavior is resolved without approximation.

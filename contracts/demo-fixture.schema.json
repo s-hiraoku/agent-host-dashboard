@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-host-dashboard.local/contracts/demo-fixture.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiInfo", "snapshot", "details", "health", "events"],
+  "properties": {
+    "apiInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "features"],
+      "properties": {
+        "apiVersion": { "const": "1" },
+        "serverVersion": { "type": "string" },
+        "features": { "type": "array", "items": { "type": "string" }, "contains": { "const": "events-after-revision" } }
+      }
+    },
+    "snapshot": { "$ref": "#/$defs/snapshot" },
+    "details": { "type": "array", "items": { "$ref": "#/$defs/detail" }, "minItems": 6 },
+    "health": { "type": "array", "items": { "$ref": "#/$defs/health" }, "minItems": 1 },
+    "events": { "type": "array", "items": { "$ref": "#/$defs/event" }, "minItems": 5 }
+  },
+  "$defs": {
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": { "const": true },
+        "read": { "const": true },
+        "interrupt": { "const": true },
+        "approve": { "const": true },
+        "reject": { "const": true }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "confidence": { "enum": ["low", "medium", "high"] },
+        "view": { "enum": ["active", "recent", "historical", "raw"] }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "provider", "status", "capabilities", "provenance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["unknown", "idle", "working", "blocked", "done", "error"] },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "cwd": { "type": "string" },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "project": { "type": "string" },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "summary"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["command", "file"] },
+        "summary": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string" },
+        "command": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "provider", "status", "capabilities", "provenance", "pendingApprovals"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["unknown", "idle", "working", "blocked", "done", "error"] },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "cwd": { "type": "string" },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "project": { "type": "string" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "pendingApprovals": { "type": "array", "items": { "$ref": "#/$defs/approval" } },
+        "publicData": { "type": "object" }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agents", "revision"],
+      "properties": {
+        "agents": { "type": "array", "items": { "$ref": "#/$defs/summary" } },
+        "revision": { "type": "integer", "minimum": 0 },
+        "nextCursor": { "type": "string" },
+        "total": { "type": "integer", "minimum": 0 },
+        "facets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["byStatus", "byProvider"],
+          "properties": {
+            "byStatus": {
+              "type": "object",
+              "propertyNames": { "enum": ["unknown", "idle", "working", "blocked", "done", "error"] },
+              "additionalProperties": { "type": "integer", "minimum": 0 }
+            },
+            "byProvider": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "status": { "enum": ["starting", "healthy", "degraded", "unavailable"] },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "agentCount": { "type": "integer", "minimum": 0 },
+        "lastAttemptAt": { "type": "string", "format": "date-time" },
+        "lastSuccessAt": { "type": "string", "format": "date-time" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "revision", "agent"],
+          "properties": { "type": { "const": "agent.upserted" }, "revision": { "type": "integer", "minimum": 0 }, "agent": { "$ref": "#/$defs/summary" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "revision", "agentId"],
+          "properties": { "type": { "const": "agent.removed" }, "revision": { "type": "integer", "minimum": 0 }, "agentId": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "revision", "adapter"],
+          "properties": { "type": { "const": "adapter.health" }, "revision": { "type": "integer", "minimum": 0 }, "adapter": { "$ref": "#/$defs/health" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "revision", "agentId", "actionId", "ok"],
+          "properties": {
+            "type": { "const": "action.completed" },
+            "revision": { "type": "integer", "minimum": 0 },
+            "agentId": { "type": "string" },
+            "actionId": { "type": "string" },
+            "ok": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "revision"],
+          "properties": { "type": { "const": "heartbeat" }, "revision": { "type": "integer", "minimum": 0 } }
+        }
+      ]
+    }
+  }
+}

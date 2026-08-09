@@ -1,4 +1,4 @@
-import type { AdapterHealth, AgentDetail, AgentSnapshot } from "../domain.js";
+import type { AdapterHealth, AgentDetail, AgentSnapshot, AgentSummary } from "../domain.js";
 
 const timestamp = "2026-01-15T09:30:00.000Z";
 
@@ -105,25 +105,27 @@ export const demoAdapterHealth: readonly AdapterHealth[] = [
   },
 ];
 
+function toSummary(detail: AgentDetail): AgentSummary {
+  const { pendingApprovals: _pendingApprovals, createdAt: _createdAt, publicData: _publicData, ...summary } = detail;
+  return summary;
+}
+
 export function createDemoSnapshot(revision = 40): AgentSnapshot {
-  return { agents: demoAgents, revision, total: demoAgents.length };
+  return { agents: demoAgents.map(toSummary), revision, total: demoAgents.length };
 }
 
 export function createLargeDemoSnapshot(count = 1_000, revision = 40): AgentSnapshot {
   if (!Number.isSafeInteger(count) || count < 0) {
     throw new RangeError("count must be a non-negative safe integer.");
   }
-  const statuses = ["idle", "working", "blocked", "done", "error", "unknown"] as const;
   const agents = Array.from({ length: count }, (_, index) => {
-    const seed = demoAgents[index % demoAgents.length]!;
+    const seed = toSummary(demoAgents[index % demoAgents.length]!);
     return {
       ...seed,
       id: `demo:agent-${String(index + 1).padStart(4, "0")}`,
       name: `Sanitized agent ${String(index + 1).padStart(4, "0")}`,
-      status: statuses[index % statuses.length]!,
       cwd: `/workspace/project-${index % 20}`,
       project: `project-${index % 20}`,
-      pendingApprovals: [],
     };
   });
   return { agents, revision, total: count };

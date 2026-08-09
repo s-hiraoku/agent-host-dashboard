@@ -14,7 +14,8 @@ import type { HttpChannel } from "./types.js";
 
 /**
  * The only layer allowed to know agent-host endpoint paths and wire fields.
- * A confirmed versioned codec will implement this interface once agent-host #2 lands.
+ * The v1 codec implements confirmed agent-host wire fields behind this boundary.
+ * UI code must never import or infer those fields directly.
  */
 export interface AgentHostWireProtocol {
   discover(channel: HttpChannel, options?: RequestOptions): Promise<ApiInfo>;
