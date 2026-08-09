@@ -47,6 +47,11 @@ export interface DashboardModel {
   perform(target: AgentDetail, action: AgentAction): Promise<AgentActionResult>;
 }
 
+export interface DashboardOptions {
+  readonly initialQuery?: DashboardQuery;
+  readonly onQueryChange?: (query: DashboardQuery) => void;
+}
+
 function requestFor(query: DashboardQuery, cursor: string | undefined): AgentPageRequest {
   return {
     limit: pageSize,
@@ -69,14 +74,14 @@ function matchesQuery(agent: AgentSummary, query: DashboardQuery): boolean {
   );
 }
 
-export function useDashboard(client: AgentHostClient): DashboardModel {
+export function useDashboard(client: AgentHostClient, options: DashboardOptions = {}): DashboardModel {
   const [snapshot, setSnapshot] = useState<AgentSnapshot>();
   const [detail, setDetail] = useState<AgentDetail>();
   const [health, setHealth] = useState<readonly AdapterHealth[]>([]);
   const [connection, setConnection] = useState<ConnectionState>({ status: "connecting", attempt: 0 });
   const [events, setEvents] = useState<readonly AgentEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [query, setQueryState] = useState<DashboardQuery>({
+  const [query, setQueryState] = useState<DashboardQuery>(options.initialQuery ?? {
     text: "",
     status: "all",
     provider: "",
@@ -180,13 +185,14 @@ export function useDashboard(client: AgentHostClient): DashboardModel {
   const setQuery = useCallback(
     (nextQuery: DashboardQuery) => {
       queryRef.current = nextQuery;
+      options.onQueryChange?.(nextQuery);
       cursorRef.current = undefined;
       setQueryState(nextQuery);
       setCursors([undefined]);
       setPage(0);
       void load();
     },
-    [load],
+    [load, options.onQueryChange],
   );
 
   const nextPage = useCallback(() => {

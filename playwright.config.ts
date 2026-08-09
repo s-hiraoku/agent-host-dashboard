@@ -26,7 +26,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      testMatch: "**/workflows.spec.ts",
+      testMatch: ["**/workflows.spec.ts", "**/daily-driver.spec.ts"],
       use: { ...baseUse, browserName: "chromium", viewport: { width: 1440, height: 900 } },
     },
     {
