@@ -19,24 +19,89 @@ export class MockAgentHostTransport implements AgentHostTransport {
   snapshots: AgentSnapshot[] = [];
   health: readonly AdapterHealth[] = demoAdapterHealth;
   eventStreams: Array<readonly AgentEvent[] | AgentHostError> = [];
+  eventStreamGate: Promise<void> | undefined;
+  holdEventStreams = false;
+  activeEventStreams = 0;
+  completedEventStreams = 0;
   readonly actions: Array<{ target: ActionTarget; action: AgentAction }> = [];
+  actionGate: Promise<void> | undefined;
 
   async discover(_options?: RequestOptions): Promise<ApiInfo> {
     return this.apiInfo;
   }
 
-  async snapshot(_request: AgentPageRequest, _options?: RequestOptions): Promise<AgentSnapshot> {
+  async snapshot(request: AgentPageRequest, _options?: RequestOptions): Promise<AgentSnapshot> {
     const snapshot = this.snapshots.shift() ?? this.currentSnapshot;
     this.currentSnapshot = snapshot;
-    return snapshot;
+    const normalizedText = request.filter?.text?.trim().toLocaleLowerCase();
+    const agents = snapshot.agents
+      .filter((agent) => !request.filter?.providers || request.filter.providers.includes(agent.provider))
+      .filter((agent) => !request.filter?.statuses || request.filter.statuses.includes(agent.status))
+      .filter((agent) => !request.filter?.cwd || agent.cwd?.includes(request.filter.cwd))
+      .filter(
+        (agent) =>
+          !normalizedText ||
+          [agent.name, agent.provider, agent.cwd, agent.project]
+            .filter((value): value is string => value !== undefined)
+            .some((value) => value.toLocaleLowerCase().includes(normalizedText)),
+      );
+    if (request.sort) {
+      const { field, direction } = request.sort;
+      const attentionPriority = { blocked: 0, error: 1, working: 2, idle: 3, done: 4, unknown: 5 } as const;
+      agents.sort((left, right) => {
+        const compared =
+          field === "status"
+            ? attentionPriority[left.status] - attentionPriority[right.status]
+            : String(left[field] ?? "").localeCompare(String(right[field] ?? ""));
+        return direction === "asc" ? compared : -compared;
+      });
+    }
+    const offset = Number.parseInt(request.cursor ?? "0", 10);
+    const limit = request.limit ?? 50;
+    const page = agents.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    const byStatus = Object.fromEntries(
+      [...new Set(agents.map((agent) => agent.status))].map((status) => [
+        status,
+        agents.filter((agent) => agent.status === status).length,
+      ]),
+    );
+    const byProvider = Object.fromEntries(
+      [...new Set(agents.map((agent) => agent.provider))].map((provider) => [
+        provider,
+        agents.filter((agent) => agent.provider === provider).length,
+      ]),
+    );
+    return {
+      agents: page,
+      revision: snapshot.revision,
+      total: agents.length,
+      facets: { byStatus, byProvider },
+      ...(nextOffset < agents.length ? { nextCursor: String(nextOffset) } : {}),
+    };
   }
 
   async detail(agentId: string, _options?: RequestOptions): Promise<AgentDetail> {
-    const agent = this.currentSnapshot.agents.find((candidate) => candidate.id === agentId);
-    if (!agent) throw new AgentHostError("not_found", `Unknown demo agent: ${agentId}.`, { status: 404 });
+    const summary = this.currentSnapshot.agents.find((candidate) => candidate.id === agentId);
+    if (!summary) throw new AgentHostError("not_found", `Unknown demo agent: ${agentId}.`, { status: 404 });
+    const recordedApprovals =
+      "pendingApprovals" in summary && Array.isArray(summary.pendingApprovals) ? summary.pendingApprovals : [];
     return {
-      ...agent,
-      pendingApprovals: "pendingApprovals" in agent && Array.isArray(agent.pendingApprovals) ? agent.pendingApprovals : [],
+      ...summary,
+      pendingApprovals:
+        recordedApprovals.length > 0
+          ? recordedApprovals
+          : summary.status === "blocked" && summary.capabilities.approve
+          ? [
+              {
+                id: `approval-${summary.id}`,
+                kind: "command",
+                summary: "Run the project verification suite",
+                reason: "Confirm the selected change before continuing",
+                command: "npm run check",
+              },
+            ]
+          : [],
     };
   }
 
@@ -46,16 +111,31 @@ export class MockAgentHostTransport implements AgentHostTransport {
 
   async action(target: ActionTarget, action: AgentAction, _options?: RequestOptions): Promise<AgentActionResult> {
     this.actions.push({ target, action });
+    await this.actionGate;
     return { ok: true, actionId: `demo-action-${this.actions.length}`, revision: this.currentSnapshot.revision + 1 };
   }
 
   async *events(options: EventStreamOptions): AsyncIterable<AgentEvent> {
     if (options.signal?.aborted) throw options.signal.reason;
-    const stream = this.eventStreams.shift() ?? [];
-    if (stream instanceof AgentHostError) throw stream;
-    for (const event of stream) {
+    this.activeEventStreams += 1;
+    try {
+      await this.eventStreamGate;
       if (options.signal?.aborted) throw options.signal.reason;
-      if (event.revision > options.afterRevision) yield event;
+      const stream = this.eventStreams.shift() ?? [];
+      if (stream instanceof AgentHostError) throw stream;
+      for (const event of stream) {
+        if (options.signal?.aborted) throw options.signal.reason;
+        if (event.revision > options.afterRevision) yield event;
+      }
+      if (this.holdEventStreams) {
+        await new Promise<void>((resolve) => {
+          if (options.signal?.aborted) resolve();
+          else options.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }
+    } finally {
+      this.activeEventStreams -= 1;
+      this.completedEventStreams += 1;
     }
   }
 }

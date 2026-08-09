@@ -79,6 +79,10 @@ export interface AgentSnapshot {
   readonly revision: number;
   readonly nextCursor?: string;
   readonly total?: number;
+  readonly facets?: {
+    readonly byStatus: Readonly<Partial<Record<AgentStatus, number>>>;
+    readonly byProvider: Readonly<Record<string, number>>;
+  };
 }
 
 export interface ApiInfo {
