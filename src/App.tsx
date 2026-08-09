@@ -70,6 +70,7 @@ function ConnectionBanner({ state, onRetry }: { readonly state: ConnectionState;
   return (
     <div className={`connection-banner connection-${state.status}`} role={state.status === "unauthorized" ? "alert" : "status"}>
       <span className="connection-label">{item.icon}{item.label}</span>
+      {state.reason && <span className="connection-reason">{state.reason}</span>}
       {state.revision !== undefined && <span className="mono muted">rev {state.revision}</span>}
       {item.action && <button type="button" className="text-button" onClick={onRetry}>{item.action}</button>}
     </div>
@@ -281,6 +282,7 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
   const model = useDashboard(client);
   const [scenario, setScenario] = useState<DemoScenario>("live");
   const displayConnection = scenarioStates[scenario] ?? model.connection;
+  const displayError = model.error === displayConnection.reason ? undefined : model.error;
   const metrics = statusMetrics(model.snapshot);
   const providers = providerMetrics(model.snapshot);
   const currentTime = now();
@@ -404,7 +406,7 @@ export function App({ client, now = Date.now }: { readonly client: AgentHostClie
 
         <ActionPanel detail={model.detail} perform={model.perform} />
       </main>
-      {model.error && <div className="global-error" role="alert"><AlertTriangle />{model.error}<button type="button" onClick={() => void model.refresh()}>Retry</button></div>}
+      {displayError && <div className="global-error" role="alert"><AlertTriangle />{displayError}<button type="button" onClick={() => void model.refresh()}>Retry</button></div>}
     </div>
   );
 }

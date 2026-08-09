@@ -7,6 +7,7 @@ import { userEvent } from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { App } from "../src/App.js";
 import { DefaultAgentHostClient } from "../src/client.js";
+import { AgentHostError } from "../src/errors.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 
@@ -122,5 +123,21 @@ describe("evaluation dashboard", () => {
     await waitFor(() => expect(transport.activeEventStreams).toBe(1));
     rendered.unmount();
     await waitFor(() => expect(transport.activeEventStreams).toBe(0));
+  });
+
+  it("does not hide an unresolved detail error after the connection recovers", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.eventStreams = [
+      new AgentHostError("connection_failed", "Stream interrupted.", { retryable: true }),
+      [{ type: "heartbeat", revision: 41 }],
+    ];
+    transport.detail = async () => {
+      throw new AgentHostError("not_found", "Detail is unavailable.");
+    };
+    renderDashboard(transport);
+
+    expect(await screen.findByText("Detail is unavailable.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Live connection")).toBeInTheDocument(), { timeout: 2_000 });
+    expect(screen.getByText("Detail is unavailable.")).toBeInTheDocument();
   });
 });

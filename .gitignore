@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-client/
+dist-types/
 coverage/
 .DS_Store
 *.log

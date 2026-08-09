@@ -97,3 +97,11 @@ explicit action button.
 ## Fixtures
 
 `src/testing/fixtures.ts` contains deterministic public-domain records for idle, working, blocked, done, error, and unknown states, including a 1,000-agent generator. It contains no tokens, user home paths, provider-native session payloads, or personal prompt content.
+
+## Quality gates
+
+Unit, semantic fixture-contract, production asset, browser E2E, accessibility,
+keyboard, narrow viewport, reconnect/resync, and 1,000-agent performance gates
+are reproducible with the commands in
+[docs/conformance.md](docs/conformance.md). Failed Playwright runs retain a
+screenshot and trace, and CI uploads those artifacts with the HTML report.
