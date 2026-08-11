@@ -57,7 +57,11 @@ export function uniqueRepositoryLocators(associations: readonly RepositoryAssoci
   const repositories = new Map<string, RepositoryLocator>();
   for (const association of associations) {
     const normalized = normalizeRepositoryLocator(association.repository);
-    repositories.set(repositoryKey(normalized), normalized);
+    const key = repositoryKey(normalized);
+    const existing = repositories.get(key);
+    if (!existing || (existing.repositoryId === undefined && normalized.repositoryId !== undefined)) {
+      repositories.set(key, normalized);
+    }
   }
   return [...repositories.values()];
 }

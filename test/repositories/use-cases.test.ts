@@ -37,10 +37,16 @@ describe("repository use cases", () => {
 
   it("deduplicates repository work before source-control queries", () => {
     expect(uniqueRepositoryLocators(demoRepositoryAssociations)).toEqual([demoRepository.locator]);
-    expect(uniqueRepositoryLocators([
+    const withoutIdLast = uniqueRepositoryLocators([
       demoRepositoryAssociations[0]!,
       { ...demoRepositoryAssociations[0]!, repository: demoRepositoryWithoutId },
-    ])).toHaveLength(1);
+    ]);
+    const withoutIdFirst = uniqueRepositoryLocators([
+      { ...demoRepositoryAssociations[0]!, repository: demoRepositoryWithoutId },
+      demoRepositoryAssociations[0]!,
+    ]);
+    expect(withoutIdLast).toEqual([demoRepository.locator]);
+    expect(withoutIdFirst).toEqual([demoRepository.locator]);
   });
 
   it("never presents repository or branch inference as a confirmed PR association", () => {
