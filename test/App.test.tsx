@@ -13,6 +13,8 @@ import type { DashboardNotificationPermission, NotificationCoordinator, Notifica
 import { defaultPreferences, type DashboardPreferences } from "../src/daily/preferences.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
+import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
+import { SourceControlError } from "../src/repositories/source-control.js";
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -86,6 +88,59 @@ describe("evaluation dashboard", () => {
     expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem").length).toBeLessThan(70);
     expect(screen.getByRole("button", { name: /Next/ })).toBeEnabled();
+  });
+
+  it("shows sanitized repository, Issue, and PR context only for the selected agent", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const repositoryContext = new MockRepositoryContextSource();
+    const sourceControl = new MockSourceControlClient();
+    const repository = vi.spyOn(sourceControl, "repository");
+    render(<App client={client} repositoryContext={repositoryContext} sourceControl={sourceControl} />);
+
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toHaveAttribute("href", "https://github.com/example-labs/orbit");
+    expect(screen.getByText("Clarify bounded parser behavior")).toBeInTheDocument();
+    expect(screen.getByText("Harden parser boundary")).toBeInTheDocument();
+    expect(screen.getByText("Agent PR")).toBeInTheDocument();
+    expect(repository).toHaveBeenCalledTimes(1);
+  });
+
+  it("provides an explicit GitHub authentication recovery state", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const sourceControl = new MockSourceControlClient();
+    sourceControl.repository = async () => {
+      throw new SourceControlError("unauthorized", "GitHub authentication failed.", { status: 401 });
+    };
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={sourceControl} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("GitHub authentication required");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("does not install stale repository context after selection changes", async () => {
+    let resolveInitial: (value: Awaited<ReturnType<MockRepositoryContextSource["forAgent"]>>) => void = () => undefined;
+    const initial = new Promise<Awaited<ReturnType<MockRepositoryContextSource["forAgent"]>>>((resolve) => { resolveInitial = resolve; });
+    const context = new MockRepositoryContextSource();
+    const forAgent = context.forAgent.bind(context);
+    context.forAgent = async (agentId, options) => agentId === "demo:agent-0002" ? await initial : await forAgent(agentId, options);
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const user = userEvent.setup();
+    render(<App client={client} repositoryContext={context} sourceControl={new MockSourceControlClient()} />);
+    const next = (await screen.findAllByRole("button", { name: /Sanitized agent/ })).find((button) => button.getAttribute("aria-current") !== "true")!;
+
+    await user.click(next);
+    resolveInitial({ state: "ready", associations: context.result.state === "ready" ? context.result.associations : [] });
+
+    expect(await screen.findByText("No repository association")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
   });
 
   it("does not present page-local sort or facet approximations as global capabilities", async () => {

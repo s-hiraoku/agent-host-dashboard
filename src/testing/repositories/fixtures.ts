@@ -22,6 +22,14 @@ export const demoRepositoryAssociations: readonly RepositoryAssociation[] = [
     pullRequest: { number: 42 },
   },
   {
+    kind: "confirmed",
+    agentId: "demo:agent-0002",
+    repository: demoRepository.locator,
+    provenance: { source: "sanitized-fixture", confidence: "high" },
+    checkout: { branch: "fix/parser-boundary", worktree: "/workspace/project-1" },
+    pullRequest: { number: 42 },
+  },
+  {
     kind: "candidate",
     agentId: "demo:orbit-candidate",
     repository: demoRepository.locator,
