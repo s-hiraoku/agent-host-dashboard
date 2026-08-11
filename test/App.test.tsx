@@ -143,6 +143,30 @@ describe("evaluation dashboard", () => {
     expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
   });
 
+  it("clears the previous agent detail and repository while the next detail is pending", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const originalDetail = transport.detail.bind(transport);
+    let pendingAgentId: string | undefined;
+    transport.detail = async (agentId, options) => {
+      if (pendingAgentId === agentId) return await new Promise<AgentDetail>(() => undefined);
+      return await originalDetail(agentId, options);
+    };
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const user = userEvent.setup();
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={new MockSourceControlClient()} />);
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toBeInTheDocument();
+    const next = (await screen.findAllByRole("button", { name: /Sanitized agent/ })).find((button) => button.getAttribute("aria-current") !== "true")!;
+    pendingAgentId = transport.currentSnapshot.agents.find((agent) => next.textContent?.includes(agent.name))?.id;
+    expect(pendingAgentId).toBeDefined();
+
+    await user.click(next);
+
+    expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Select an agent to inspect its public details.")).toBeInTheDocument();
+  });
+
   it("does not present page-local sort or facet approximations as global capabilities", async () => {
     const transport = new MockAgentHostTransport();
     transport.apiInfo = { apiVersion: "1", features: ["fixed-attention-order"] };

@@ -703,7 +703,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
                 <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
               </dl>
               <div className="capability-row"><span className="field-label">Public capabilities</span><div>{agentActions.filter((action) => model.detail?.capabilities[action]).map((action) => <span className="capability" key={action}>{action}</span>)}</div></div>
-              <RepositoryPanel agentId={model.detail.id} contextSource={repositoryContext} sourceControl={sourceControl} />
+              {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} />}
               <section className="timeline" aria-labelledby="timeline-heading">
                 <div className="section-heading"><div><p className="eyebrow">Semantic stream</p><h3 id="timeline-heading">Live events</h3></div><span className="live-indicator"><Activity aria-hidden="true" />Live</span></div>
                 <ol>
