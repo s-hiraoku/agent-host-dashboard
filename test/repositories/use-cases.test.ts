@@ -26,6 +26,8 @@ describe("repository use cases", () => {
       .toThrow(/one repository locator segment/);
     expect(repositoryKey({ ...locator, repositoryId: "R_demo_1" }))
       .toBe("github:github.com:example-labs:orbit");
+    expect(repositoryKey({ ...locator, host: "GITHUB.COM", owner: "IDENTITY" }))
+      .toBe("github:github.com:identity:orbit");
   });
 
   it("enforces bounded pagination and search inputs", () => {
@@ -56,6 +58,10 @@ describe("repository use cases", () => {
 
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, confirmed)).toBe("associated");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, branchCandidate)).toBe("candidate");
+    expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, {
+      ...branchCandidate,
+      head: { owner: "another-contributor", branch: branchCandidate.head.branch },
+    })).toBe("repository_wide");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, repositoryWide)).toBe("repository_wide");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepositoryWithoutId, confirmed)).toBe("associated");
 

@@ -54,6 +54,14 @@ export class MockSourceControlClient implements SourceControlClient {
     return repository;
   }
 
+  async pullRequest(locator: RepositoryLocator, number: number, options?: SourceControlRequestOptions): Promise<SourceControlPullRequest> {
+    ensureActive(options?.signal);
+    if (!Number.isSafeInteger(number) || number < 1) throw new RangeError("pull request number must be a positive integer.");
+    const pullRequest = this.pullRequestsByRepository.get(repositoryKey(locator))?.find((item) => item.number === number);
+    if (!pullRequest) throw new SourceControlError("not_found", "The sanitized pull request was not found.", { status: 404 });
+    return pullRequest;
+  }
+
   async issues(
     locator: RepositoryLocator,
     request: IssuePageRequest = {},

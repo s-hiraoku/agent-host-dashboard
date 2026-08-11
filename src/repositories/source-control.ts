@@ -90,6 +90,11 @@ export interface SourceControlPage<T> {
 
 export interface SourceControlClient {
   repository(locator: RepositoryLocator, options?: SourceControlRequestOptions): Promise<SourceControlRepository>;
+  pullRequest(
+    locator: RepositoryLocator,
+    number: number,
+    options?: SourceControlRequestOptions,
+  ): Promise<SourceControlPullRequest>;
   issues(
     locator: RepositoryLocator,
     request?: IssuePageRequest,

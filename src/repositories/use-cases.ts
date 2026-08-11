@@ -20,7 +20,7 @@ function requiredSegment(value: string, label: string): string {
 }
 
 export function normalizeRepositoryLocator(locator: RepositoryLocator): RepositoryLocator {
-  const host = requiredSegment(locator.host, "host").toLocaleLowerCase();
+  const host = requiredSegment(locator.host, "host").toLowerCase();
   const owner = requiredSegment(locator.owner, "owner");
   const name = requiredSegment(locator.name, "name").replace(/\.git$/iu, "");
   if (!name) throw new TypeError("name must be one repository locator segment.");
@@ -36,7 +36,7 @@ export function normalizeRepositoryLocator(locator: RepositoryLocator): Reposito
 export function repositoryKey(locator: RepositoryLocator): string {
   const normalized = normalizeRepositoryLocator(locator);
   return [normalized.service, normalized.host, normalized.owner, normalized.name]
-    .map((segment) => segment.toLocaleLowerCase())
+    .map((segment) => segment.toLowerCase())
     .join(":");
 }
 
@@ -83,10 +83,12 @@ export function pullRequestRelationship(
     if (!sameRepository(association.repository, repository)) continue;
     const branch = association.checkout?.branch;
     if (association.kind === "candidate" && association.reason === "repository_match") return "candidate";
-    if (association.kind === "candidate" && association.reason === "branch_match" && branch === pullRequest.head.branch) {
+    const sameHeadOwner = pullRequest.head.owner !== undefined
+      && pullRequest.head.owner.toLowerCase() === association.repository.owner.toLowerCase();
+    if (association.kind === "candidate" && association.reason === "branch_match" && branch === pullRequest.head.branch && sameHeadOwner) {
       return "candidate";
     }
-    if (branch && branch === pullRequest.head.branch) return "candidate";
+    if (branch && branch === pullRequest.head.branch && sameHeadOwner) return "candidate";
   }
   return "repository_wide";
 }

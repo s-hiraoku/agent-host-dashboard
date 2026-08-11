@@ -22,6 +22,7 @@ dashboard repository use cases
 
 - `confirmed` requires explicit association evidence. Only a confirmed association may carry an explicit pull-request number.
 - `candidate` records a repository or branch match that still needs user judgment.
+- A branch match also requires the pull-request head owner to match the structured repository owner; a same-named branch in another fork is not evidence.
 - `repository_wide` means the pull request belongs to the repository but has no agent-specific evidence.
 
 Repository equality uses structured `service`, `host`, `owner`, and `name` fields. The optional `repositoryId` is enrichment and never changes equality when one response omits it. URLs are navigation targets, not identity or correlation inputs. GitHub.com is the first transport target; retaining `host` prevents a future GitHub Enterprise migration from changing the domain shape.
