@@ -12,6 +12,8 @@ import { relatePullRequests, repositoryKey, uniqueRepositoryLocators } from "../
 
 const maximumRepositories = 8;
 const maximumConcurrency = 3;
+const maximumIssuePages = 8;
+const maximumIssues = 6;
 const maximumPullRequests = 8;
 
 export interface RepositoryOverviewEntry {
@@ -21,9 +23,16 @@ export interface RepositoryOverviewEntry {
   readonly pullRequests: readonly RelatedPullRequest[];
 }
 
+export interface RepositoryOverviewFailure {
+  readonly repository: string;
+  readonly code: string;
+  readonly message: string;
+  readonly retryAt?: string;
+}
+
 export type RepositoryOverviewState =
   | { readonly status: "idle" | "loading" }
-  | { readonly status: "ready"; readonly entries: readonly RepositoryOverviewEntry[]; readonly truncated: boolean }
+  | { readonly status: "ready"; readonly entries: readonly RepositoryOverviewEntry[]; readonly failures: readonly RepositoryOverviewFailure[]; readonly truncated: boolean }
   | { readonly status: "unsupported" | "unavailable"; readonly message: string; readonly retryable: boolean }
   | { readonly status: "error"; readonly code: string; readonly message: string; readonly retryAt?: string };
 
@@ -43,6 +52,28 @@ async function mapLimited<T, R>(
   };
   await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
   return results;
+}
+
+async function openIssues(
+  sourceControl: SourceControlClient,
+  locator: RepositoryAssociation["repository"],
+  signal: AbortSignal,
+): Promise<readonly SourceControlIssue[]> {
+  const issues: SourceControlIssue[] = [];
+  const visitedCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < maximumIssuePages && issues.length < maximumIssues; page += 1) {
+    const result = await sourceControl.issues(
+      locator,
+      { states: ["open"], limit: maximumIssues, ...(cursor === undefined ? {} : { cursor }) },
+      { signal },
+    );
+    issues.push(...result.items.slice(0, maximumIssues - issues.length));
+    if (!result.nextCursor || visitedCursors.has(result.nextCursor)) break;
+    visitedCursors.add(result.nextCursor);
+    cursor = result.nextCursor;
+  }
+  return issues;
 }
 
 export function useRepositoryOverview(
@@ -77,26 +108,50 @@ export function useRepositoryOverview(
         }
         const locators = uniqueRepositoryLocators(context.associations);
         const selected = locators.slice(0, maximumRepositories);
-        const entries = await mapLimited(selected, maximumConcurrency, async (locator) => {
-          const associations = context.associations.filter((association) => repositoryKey(association.repository) === repositoryKey(locator));
-          const explicitPullRequestNumbers = [...new Set(associations.flatMap((association) => association.kind === "confirmed" && association.pullRequest ? [association.pullRequest.number] : []))]
-            .slice(0, maximumPullRequests);
-          const [repository, issues, pullRequests, explicitPullRequests] = await Promise.all([
-            sourceControl.repository(locator, { signal: controller.signal }),
-            sourceControl.issues(locator, { states: ["open"], limit: 6 }, { signal: controller.signal }),
-            sourceControl.pullRequests(locator, { states: ["open"], limit: maximumPullRequests }, { signal: controller.signal }),
-            mapLimited(explicitPullRequestNumbers, maximumConcurrency, async (number) => await sourceControl.pullRequest(locator, number, { signal: controller.signal })),
-          ]);
-          const combinedPullRequests = new Map(pullRequests.items.map((pullRequest) => [pullRequest.number, pullRequest]));
-          for (const pullRequest of explicitPullRequests) combinedPullRequests.set(pullRequest.number, pullRequest);
-          return {
-            repository,
-            associations,
-            issues: issues.items,
-            pullRequests: relatePullRequests(associations, locator, [...combinedPullRequests.values()]).slice(0, maximumPullRequests),
-          };
+        const results = await mapLimited(selected, maximumConcurrency, async (locator) => {
+          try {
+            const associations = context.associations.filter((association) => repositoryKey(association.repository) === repositoryKey(locator));
+            const explicitPullRequestNumbers = [...new Set(associations.flatMap((association) => association.kind === "confirmed" && association.pullRequest ? [association.pullRequest.number] : []))]
+              .slice(0, maximumPullRequests);
+            const [repository, issues, pullRequests, explicitPullRequests] = await Promise.all([
+              sourceControl.repository(locator, { signal: controller.signal }),
+              openIssues(sourceControl, locator, controller.signal),
+              sourceControl.pullRequests(locator, { states: ["open"], limit: maximumPullRequests }, { signal: controller.signal }),
+              mapLimited(explicitPullRequestNumbers, maximumConcurrency, async (number) => await sourceControl.pullRequest(locator, number, { signal: controller.signal })),
+            ]);
+            const combinedPullRequests = new Map(pullRequests.items.map((pullRequest) => [pullRequest.number, pullRequest]));
+            for (const pullRequest of explicitPullRequests) combinedPullRequests.set(pullRequest.number, pullRequest);
+            return {
+              status: "ready" as const,
+              entry: {
+                repository,
+                associations,
+                issues,
+                pullRequests: relatePullRequests(associations, locator, [...combinedPullRequests.values()]).slice(0, maximumPullRequests),
+              },
+            };
+          } catch (failure) {
+            const error = failure instanceof SourceControlError ? failure : toSourceControlError(failure);
+            if (error.code === "aborted") throw error;
+            return {
+              status: "error" as const,
+              error,
+              failure: {
+                repository: `${locator.host}/${locator.owner}/${locator.name}`,
+                code: error.code,
+                message: error.message,
+                ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+              },
+            };
+          }
         });
-        if (!controller.signal.aborted) setState({ status: "ready", entries, truncated: locators.length > selected.length });
+        const entries = results.flatMap((result) => result.status === "ready" ? [result.entry] : []);
+        const failures = results.flatMap((result) => result.status === "error" ? [result.failure] : []);
+        if (!entries.length && failures.length) {
+          const failed = results.find((result) => result.status === "error");
+          if (failed?.status === "error") throw failed.error;
+        }
+        if (!controller.signal.aborted) setState({ status: "ready", entries, failures, truncated: locators.length > selected.length });
       })
       .catch((failure: unknown) => {
         if (controller.signal.aborted) return;

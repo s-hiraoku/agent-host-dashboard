@@ -15,7 +15,7 @@ import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
 import { SourceControlError } from "../src/repositories/source-control.js";
-import { demoPullRequests } from "../src/testing/repositories/fixtures.js";
+import { demoIssues, demoPullRequests, demoRepositoryAssociations } from "../src/testing/repositories/fixtures.js";
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -121,6 +121,46 @@ describe("evaluation dashboard", () => {
     expect(await screen.findByText("Harden parser boundary")).toBeInTheDocument();
     expect(screen.getByText("Agent PR")).toBeInTheDocument();
     expect(pullRequest).toHaveBeenCalledWith(expect.objectContaining({ name: "orbit" }), 42, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("continues bounded Issue pagination when a page contains no Issue entries", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const sourceControl = new MockSourceControlClient();
+    const issues = vi.spyOn(sourceControl, "issues")
+      .mockResolvedValueOnce({ items: [], nextCursor: "2" })
+      .mockResolvedValueOnce({ items: [demoIssues[0]!] });
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={sourceControl} />);
+
+    expect(await screen.findByText("Clarify bounded parser behavior")).toBeInTheDocument();
+    expect(issues).toHaveBeenNthCalledWith(2, expect.anything(), expect.objectContaining({ cursor: "2" }), expect.anything());
+  });
+
+  it("keeps valid repository context visible when another association fails", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const repositoryContext = new MockRepositoryContextSource();
+    repositoryContext.result = {
+      state: "ready",
+      revision: 41,
+      associations: [
+        ...demoRepositoryAssociations,
+        {
+          kind: "confirmed",
+          agentId: "demo:agent-0002",
+          repository: { service: "github", host: "github.com", owner: "example-labs", name: "retired" },
+          provenance: { source: "sanitized-fixture", confidence: "high" },
+        },
+      ],
+    };
+    render(<App client={client} repositoryContext={repositoryContext} sourceControl={new MockSourceControlClient()} />);
+
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toBeInTheDocument();
+    expect(screen.getByText(/Repository context unavailable for github.com\/example-labs\/retired/)).toBeInTheDocument();
   });
 
   it("provides an explicit GitHub authentication recovery state", async () => {
