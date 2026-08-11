@@ -107,11 +107,11 @@ describe("agent-host connection", () => {
     expect(recorded.errors).toEqual([]);
   });
 
-  it("detects a sequence gap even when the snapshot revision is unchanged", async () => {
+  it("detects a replayed sequence even when the snapshot revision is unchanged", async () => {
     const transport = new MockAgentHostTransport();
     transport.eventStreams = [[
       { type: "heartbeat", revision: 40, sequence: 10 },
-      { type: "heartbeat", revision: 40, sequence: 12 },
+      { type: "heartbeat", revision: 40, sequence: 10 },
     ]];
     const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
     const recorded = recorder();

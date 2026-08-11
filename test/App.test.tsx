@@ -166,7 +166,7 @@ describe("evaluation dashboard", () => {
     await user.selectOptions(screen.getByLabelText("Status"), "blocked");
     await user.click((await screen.findAllByRole("button", { name: /Sanitized agent/ }))[0]!);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/host did not expose command or file context/);
+    expect(await screen.findByText(/host did not expose command or file context/)).toHaveAttribute("role", "status");
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });

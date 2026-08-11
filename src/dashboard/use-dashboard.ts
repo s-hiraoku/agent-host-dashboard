@@ -118,7 +118,6 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const actionSequence = useRef(0);
   const queryRef = useRef(query);
   const onQueryChangeRef = useRef(options.onQueryChange);
-  onQueryChangeRef.current = options.onQueryChange;
   const cursorRef = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
   const detailRequestGeneration = useRef(0);
@@ -171,11 +170,9 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       setApiInfo(nextApiInfo);
       setHealth(nextHealth);
       setLoadError(undefined);
-      setSelectedId((current) => {
-        const next = current ?? reconciledSnapshot.agents[0]?.id;
-        selectedIdRef.current = next;
-        return next;
-      });
+      const nextSelectedId = selectedIdRef.current ?? reconciledSnapshot.agents[0]?.id;
+      selectedIdRef.current = nextSelectedId;
+      setSelectedId(nextSelectedId);
     } catch (failure) {
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
       setLoadError(toAgentHostError(failure).message);
@@ -183,6 +180,10 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       if (generation === requestGeneration.current) setLoading(false);
     }
   }, [client]);
+
+  useEffect(() => {
+    onQueryChangeRef.current = options.onQueryChange;
+  }, [options.onQueryChange]);
 
   useEffect(() => () => {
     requestController.current?.abort();

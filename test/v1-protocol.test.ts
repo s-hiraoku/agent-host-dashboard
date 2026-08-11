@@ -110,6 +110,31 @@ describe("AgentHostV1Protocol", () => {
     expect(channel.requests.map((value) => value.headers?.["idempotency-key"])).toEqual(["retry-action-0001"]);
   });
 
+  it("honors Retry-After before one rate-limit retry", async () => {
+    const channel = new RecordingChannel();
+    const request = channel.request.bind(channel);
+    const delays: number[] = [];
+    let attempts = 0;
+    channel.request = async (input) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new AgentHostError("rate_limited", "slow down", {
+          retryable: true,
+          details: { retryAfter: "2" },
+        });
+      }
+      return await request(input);
+    };
+    channel.responses = [{ apiVersion: "1", result: { ok: true, agentId: agent.id, action: "read", replayed: true } }];
+    const protocol = new AgentHostV1Protocol({
+      createIdempotencyKey: () => "rate-action-0001",
+      sleep: async (delayMs) => { delays.push(delayMs); },
+    });
+
+    await expect(protocol.action(channel, { id: agent.id }, { kind: "read" })).resolves.toEqual({ ok: true, actionId: "rate-action-0001" });
+    expect(delays).toEqual([2_000]);
+  });
+
   it("keeps stream sequence separate from snapshot revision and ignores unknown events", async () => {
     const channel = new RecordingChannel();
     channel.frames = [
@@ -145,5 +170,11 @@ describe("AgentHostV1Protocol", () => {
     incompatible.frames = [{ event: "ready", data: JSON.stringify({ apiVersion: "2", revision: 7, sequence: 1 }) }];
     await expect(protocol.events(incompatible, { afterRevision: 7 })[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(AgentHostError);
     await expect(protocol.events(incompatible, { afterRevision: 7 })[Symbol.asyncIterator]().next()).rejects.toMatchObject({ code: "incompatible_version" });
+
+    const empty = new RecordingChannel();
+    await expect(protocol.events(empty, { afterRevision: 7 })[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      code: "connection_failed",
+      retryable: true,
+    });
   });
 });

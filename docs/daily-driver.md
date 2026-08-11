@@ -12,10 +12,11 @@ The development connector is a deterministic demo adapter for onboarding and
 recovery tests. A persistent simulation banner states that it never contacts the
 entered endpoint. It does not define agent-host paths or wire fields. Agent-host
 issues #2 and #4 now define the v1 wire and bearer-authentication contracts.
-Production builds use the v1 codec and require the bearer token at connection
-time. Development stays in labelled simulation mode unless `?connector=real` is
-present. Unsupported global sort/facets remain visibly unavailable rather than
-being approximated from the current page.
+Production builds use the v1 codec. Direct v1 connections accept the bearer
+token at connection time; a same-origin proxy may inject it without exposing it
+to the form. Development stays in labelled simulation mode unless
+`?connector=real` is present. Unsupported global sort/facets remain visibly
+unavailable rather than being approximated from the current page.
 
 ## Credential lifetime
 

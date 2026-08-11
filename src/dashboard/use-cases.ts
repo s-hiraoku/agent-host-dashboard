@@ -51,7 +51,8 @@ export function statusMetrics(snapshot: AgentSnapshot | undefined): readonly Sta
 
 export function providerMetrics(snapshot: AgentSnapshot | undefined): readonly (readonly [string, number | undefined])[] {
   if (snapshot?.facets) {
-    return Object.entries(snapshot.facets.byProvider).sort((left, right) => right[1] - left[1]);
+    return Object.entries(snapshot.facets.byProvider)
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
   }
   const counts = new Map<string, number>();
   for (const agent of snapshot?.agents ?? []) counts.set(agent.provider, (counts.get(agent.provider) ?? 0) + 1);
@@ -144,9 +145,7 @@ export function reconcileVisibleEvents(
   matches: (agent: AgentSummary) => boolean = () => true,
 ): AgentSnapshot {
   return events
-    .filter((event) => event.sequence === undefined
-      ? event.revision > snapshot.revision
-      : event.revision >= snapshot.revision)
+    .filter((event) => event.revision > snapshot.revision)
     .sort((left, right) =>
       left.revision - right.revision
       || (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER))

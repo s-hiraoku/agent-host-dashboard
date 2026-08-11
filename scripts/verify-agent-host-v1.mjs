@@ -36,7 +36,7 @@ const client = new DefaultAgentHostClient(
 async function waitForHost() {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(500) });
+      const response = await fetch(`${baseUrl}/ready`, { signal: AbortSignal.timeout(500) });
       if (response.ok) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -69,7 +69,7 @@ const observed = await Promise.race([
   nextEvent,
   new Promise((_, reject) => setTimeout(() => reject(new Error("semantic action event timed out")), 2_000)),
 ]);
-if (observed.done || observed.value.type !== "action.completed" || observed.value.actionId.length === 0) {
+if (observed.done || observed.value.type !== "action.completed" || observed.value.agentId !== idle.id || observed.value.actionId.length === 0) {
   throw new Error("expected one correlated action.completed event");
 }
 await client.action(blocked, { kind: "approve", approvalId: blocked.pendingApprovals[0].id });

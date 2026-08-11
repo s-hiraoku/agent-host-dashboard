@@ -224,13 +224,30 @@ function actionPayload(action: AgentAction): JsonRecord {
 
 export interface AgentHostV1ProtocolOptions {
   readonly createIdempotencyKey?: () => string;
+  readonly sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export class AgentHostV1Protocol implements AgentHostWireProtocol {
   private readonly createIdempotencyKey: () => string;
+  private readonly sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 
   constructor(options: AgentHostV1ProtocolOptions = {}) {
     this.createIdempotencyKey = options.createIdempotencyKey ?? (() => crypto.randomUUID());
+    this.sleep = options.sleep ?? ((delayMs, signal) => new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      const abort = () => {
+        clearTimeout(timer);
+        reject(signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      }, delayMs);
+      signal?.addEventListener("abort", abort, { once: true });
+    }));
   }
 
   async discover(channel: HttpChannel, options?: RequestOptions): Promise<ApiInfo> {
@@ -305,6 +322,11 @@ export class AgentHostV1Protocol implements AgentHostWireProtocol {
     } catch (error) {
       const failure = toAgentHostError(error);
       if (!failure.retryable || options?.signal?.aborted) throw failure;
+      if (failure.code === "rate_limited") {
+        const value = failure.details?.retryAfter;
+        const seconds = typeof value === "string" ? Number(value) : Number.NaN;
+        if (Number.isFinite(seconds) && seconds > 0) await this.sleep(seconds * 1_000, options?.signal);
+      }
       response = await channel.request(request);
     }
     const body = record(response.body, "action response");
@@ -347,6 +369,10 @@ export class AgentHostV1Protocol implements AgentHostWireProtocol {
       const decoded = event(frame, body, sequence);
       if (decoded) yield decoded;
     }
-    if (!ready) invalid("SSE ready event");
+    if (!ready) {
+      throw new AgentHostError("connection_failed", "The event stream closed before the ready handshake.", {
+        retryable: true,
+      });
+    }
   }
 }

@@ -142,14 +142,14 @@ async function runConnection(
         let streamSequence: number | undefined;
         for await (const event of client.events({ afterRevision: revision, signal })) {
           const sequenced = event.sequence !== undefined;
-          if (event.sequence !== undefined && streamSequence !== undefined && event.sequence !== streamSequence + 1) {
+          if (event.sequence !== undefined && streamSequence !== undefined && event.sequence <= streamSequence) {
             throw new AgentHostError(
               "revision_gap",
-              `Expected event sequence ${streamSequence + 1}, received ${event.sequence}; refreshing the snapshot.`,
-              { retryable: true, details: { expected: streamSequence + 1, received: event.sequence } },
+              `Expected an event sequence above ${streamSequence}, received ${event.sequence}; refreshing the snapshot.`,
+              { retryable: true, details: { current: streamSequence, received: event.sequence } },
             );
           }
-          streamSequence = event.sequence;
+          if (event.sequence !== undefined) streamSequence = event.sequence;
           if (!sequenced && event.revision <= revision) continue;
           const revisionGap = sequenced
             ? event.revision < revision || event.revision > revision + 1

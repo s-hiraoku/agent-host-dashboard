@@ -24,7 +24,7 @@ async function notificationNamespaceFor(endpoint: string): Promise<string> {
   return [...new Uint8Array(digest).slice(0, 12)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function DailyDriverShell({ connector, preferenceStore, environmentNotice, credentialRequired = false, notificationGateway, notificationCoordinator }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly credentialRequired?: boolean; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator }) {
+export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator }) {
   const [preferences, setPreferences] = useState(() => preferenceStore.load());
   const [lease, setLease] = useState<ClientLease>();
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -205,7 +205,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
         {copy && <div className={`recovery-callout recovery-${failure?.kind}`} role="alert">{copy.icon}<div><strong>{copy.guidance}</strong><p>{failure?.message}</p></div></div>}
         <form ref={formRef} onSubmit={(event) => void connect(event)}>
           <label><span>Agent-host endpoint</span><input name="endpoint" type="text" inputMode="url" required defaultValue={preferences.endpoint} autoComplete="url" spellCheck={false} /></label>
-          <label><span>Access token <small>{credentialRequired ? "required by agent-host API v1" : "optional in simulation"}</small></span><input name="credential" type="password" autoComplete="off" spellCheck={false} required={credentialRequired} /></label>
+          <label><span>Access token <small>required for direct v1 connections; optional when a same-origin proxy injects it</small></span><input name="credential" type="password" autoComplete="off" spellCheck={false} /></label>
           <button className="primary-button" type="submit" disabled={connecting}>{connecting ? <><RotateCcw className="spin" />Checking public API…</> : "Connect securely"}</button>
           {connecting && <button className="secondary-button" type="button" onClick={cancelAttempt}>Cancel connection attempt</button>}
           {lease && <button className="secondary-button" type="button" onClick={returnToWorkspace}>Return to current workspace</button>}

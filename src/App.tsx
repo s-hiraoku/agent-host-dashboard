@@ -216,7 +216,7 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
         <section className="approval-card" key={approval.id} aria-labelledby={`approval-${approval.id}`}>
           <div className="approval-title"><ShieldAlert aria-hidden="true" /><h3 id={`approval-${approval.id}`}>Pending approval</h3></div>
           <ApprovalContext approval={approval} />
-          {approval.kind === "other" && <p className="keyboard-warning" role="alert">Approve and reject are disabled because the host did not expose command or file context for this request.</p>}
+          {approval.kind === "other" && <p className="keyboard-warning" role="status">Approve and reject are disabled because the host did not expose command or file context for this request.</p>}
           <div className="approval-actions">
             {approval.kind !== "other" && detail.capabilities.reject && (
               <button type="button" className="reject-button" disabled={busy} onClick={() => setPending({
@@ -432,6 +432,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
   const globalFacetsUnavailable = model.snapshot !== undefined
     && model.snapshot.facets === undefined
     && model.snapshot.total !== model.snapshot.agents.length;
+  const sortUnavailable = model.apiInfo !== undefined && !model.apiInfo.features.includes("sort");
   const metrics = statusMetrics(model.snapshot);
   const providers = providerMetrics(model.snapshot);
   const currentTime = now();
@@ -607,12 +608,12 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
                 </button>
               ))}
             </div>
-            <label className="sort-control"><span>Sort</span><select disabled={model.apiInfo !== undefined && !model.apiInfo.features.includes("sort")} title={model.apiInfo !== undefined && !model.apiInfo.features.includes("sort") ? "This host exposes fixed attention ordering." : undefined} value={`${model.query.sort.field}:${model.query.sort.direction}`} onChange={(event) => {
+            <label className="sort-control"><span>Sort</span><select disabled={sortUnavailable} title={sortUnavailable ? "This host exposes fixed attention ordering." : undefined} value={`${model.query.sort.field}:${model.query.sort.direction}`} onChange={(event) => {
               const [field, direction] = event.target.value.split(":") as [DashboardQuery["sort"]["field"], DashboardQuery["sort"]["direction"]];
               model.setQuery(updateQuery(model.query, { sort: { field, direction } }));
             }}><option value="status:asc">Attention first</option><option value="lastActivityAt:desc">Last activity</option><option value="name:asc">Name A–Z</option><option value="provider:asc">Provider</option></select></label>
             {globalFacetsUnavailable && <p className="hint" role="status">Global status and provider counts are unavailable from this host. Dashes are shown instead of page-local approximations.</p>}
-            {model.apiInfo !== undefined && !model.apiInfo.features.includes("sort") && <p className="hint">This host uses fixed attention ordering; alternate global sorts are disabled.</p>}
+            {sortUnavailable && <p className="hint">This host uses fixed attention ordering; alternate global sorts are disabled.</p>}
           </div>
           <div className="result-meta"><span>{model.loading ? "Updating…" : `${model.snapshot?.agents.length ?? 0} shown of ${model.snapshot?.total ?? 0}`}</span><span className="mono">rev {model.snapshot?.revision ?? "—"}</span></div>
           <ul className="agent-list">

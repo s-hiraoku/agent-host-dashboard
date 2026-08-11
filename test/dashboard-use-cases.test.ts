@@ -94,7 +94,7 @@ describe("dashboard use cases", () => {
     expect(reconciled.facets?.byProvider["demo-alpha"]).toBe(9);
   });
 
-  it("replays sequenced events from the same revision over an in-flight snapshot", () => {
+  it("does not replay sequenced events already represented by an authoritative snapshot", () => {
     const snapshot = createLargeDemoSnapshot(10, 41);
     const first = snapshot.agents[0]!;
     const second = snapshot.agents[1]!;
@@ -103,9 +103,17 @@ describe("dashboard use cases", () => {
       { type: "agent.upserted", revision: 41, sequence: 11, agent: { ...first, name: "First update" } },
     ]);
 
-    expect(reconciled.agents[0]?.name).toBe("First update");
-    expect(reconciled.agents[1]?.name).toBe("Second update");
-    expect(reconciled.eventSequence).toBe(12);
+    expect(reconciled).toEqual(snapshot);
+  });
+
+  it("rejects snapshot replay when the bounded event buffer overflowed after the request began", () => {
+    let buffer: BoundedEventBuffer = { entries: [], droppedThroughOrdinal: 0 };
+    for (let ordinal = 1; ordinal <= 501; ordinal += 1) {
+      buffer = appendBoundedEvent(buffer, ordinal, { type: "heartbeat", revision: 40 + ordinal });
+    }
+
+    expect(() => replayableEvents(buffer, 0)).toThrow(/outpaced the bounded snapshot replay buffer/);
+    expect(replayableEvents(buffer, 1)).toHaveLength(500);
   });
 
   it("invalidates aggregate facets when an off-page event cannot be reconciled safely", () => {

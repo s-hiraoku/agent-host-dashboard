@@ -157,7 +157,6 @@ const app = fixtureMode === "onboarding"
   ? <DailyDriverShell
       connector={realConnector ? productionConnector : demoConnector}
       preferenceStore={new LocalPreferenceStore()}
-      credentialRequired={realConnector}
       {...(realConnector ? {} : { environmentNotice: simulationNotice })}
     />
   : <App client={createFixtureClient(fixtureMode)} now={() => Date.parse("2026-01-15T09:31:00.000Z")} />;

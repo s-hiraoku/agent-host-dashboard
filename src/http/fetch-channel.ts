@@ -92,13 +92,18 @@ async function responseError(response: Response, fallback: string): Promise<Agen
     }
   }
   const requestId = response.headers.get("x-request-id") ?? undefined;
+  const retryAfter = response.status === 429 ? response.headers.get("retry-after") ?? undefined : undefined;
   const code = errorCode(response.status, apiCode);
   return new AgentHostError(code, message, {
     status: response.status,
     retryable: code === "revision_gap" || response.status === 429 || response.status >= 500,
     ...(requestId === undefined ? {} : { requestId }),
-    ...(apiCode === undefined && apiDetails === undefined ? {} : {
-      details: { ...(apiCode === undefined ? {} : { apiCode }), ...apiDetails },
+    ...(apiCode === undefined && apiDetails === undefined && retryAfter === undefined ? {} : {
+      details: {
+        ...(apiCode === undefined ? {} : { apiCode }),
+        ...(retryAfter === undefined ? {} : { retryAfter }),
+        ...apiDetails,
+      },
     }),
   });
 }

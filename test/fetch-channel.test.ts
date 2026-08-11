@@ -94,12 +94,29 @@ describe("FetchHttpChannel", () => {
     );
     const channel = new FetchHttpChannel({ fetch });
 
-    await expect(channel.request({ path: "/v1/agents?cursor=opaque" })).rejects.toMatchObject({
+    const failure = await channel.request({ path: "/v1/agents?cursor=opaque" }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
       code: "revision_gap",
       status: 409,
       retryable: true,
       message: "restart pagination",
       details: { apiCode: "stale_cursor", cursor: "stale" },
+    });
+    expect(Object.keys((failure as AgentHostError).details ?? {})).toEqual(["apiCode", "cursor"]);
+  });
+
+  it("preserves Retry-After as safe rate-limit metadata", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ apiVersion: "1", error: { code: "rate_limited", message: "slow down" } }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "3" },
+      }),
+    );
+
+    await expect(new FetchHttpChannel({ fetch }).request({ path: "/v1/agents" })).rejects.toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      details: { apiCode: "rate_limited", retryAfter: "3" },
     });
   });
 
