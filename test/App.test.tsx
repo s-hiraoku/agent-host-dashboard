@@ -163,6 +163,46 @@ describe("evaluation dashboard", () => {
     expect(screen.getByText(/Repository context unavailable for github.com\/example-labs\/retired/)).toBeInTheDocument();
   });
 
+  it("keeps confirmed repositories inside the bounded overview before candidates", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const repositoryContext = new MockRepositoryContextSource();
+    const sourceControl = new MockSourceControlClient();
+    const candidates = Array.from({ length: 8 }, (_, index) => ({
+      service: "github" as const,
+      host: "github.com",
+      owner: "example-labs",
+      name: `candidate-${index}`,
+    }));
+    for (const locator of candidates) {
+      const key = `github:github.com:example-labs:${locator.name}`;
+      sourceControl.repositories.set(key, { locator, url: `https://github.com/example-labs/${locator.name}`, visibility: "public" });
+      sourceControl.issuesByRepository.set(key, []);
+      sourceControl.pullRequestsByRepository.set(key, []);
+    }
+    repositoryContext.result = {
+      state: "ready",
+      revision: 42,
+      associations: [
+        ...candidates.map((repository) => ({
+          kind: "candidate" as const,
+          agentId: "demo:agent-0002",
+          repository,
+          provenance: { source: "sanitized-fixture", confidence: "medium" as const },
+          reason: "repository_match" as const,
+        })),
+        { ...demoRepositoryAssociations[0]!, agentId: "demo:agent-0002" },
+      ],
+    };
+    render(<App client={client} repositoryContext={repositoryContext} sourceControl={sourceControl} />);
+
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /example-labs\/candidate-7/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Showing the first 8 associated repositories.")).toBeInTheDocument();
+  });
+
   it("provides an explicit GitHub authentication recovery state", async () => {
     const transport = new MockAgentHostTransport();
     transport.currentSnapshot = createLargeDemoSnapshot();

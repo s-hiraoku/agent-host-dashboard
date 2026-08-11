@@ -107,7 +107,12 @@ export function useRepositoryOverview(
           return;
         }
         const locators = uniqueRepositoryLocators(context.associations);
-        const selected = locators.slice(0, maximumRepositories);
+        const confirmedRepositories = new Set(context.associations
+          .filter((association) => association.kind === "confirmed")
+          .map((association) => repositoryKey(association.repository)));
+        const prioritizedLocators = [...locators].sort((left, right) =>
+          Number(!confirmedRepositories.has(repositoryKey(left))) - Number(!confirmedRepositories.has(repositoryKey(right))));
+        const selected = prioritizedLocators.slice(0, maximumRepositories);
         const results = await mapLimited(selected, maximumConcurrency, async (locator) => {
           try {
             const associations = context.associations.filter((association) => repositoryKey(association.repository) === repositoryKey(locator));
