@@ -15,6 +15,7 @@ import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
 import { SourceControlError } from "../src/repositories/source-control.js";
+import { demoPullRequests } from "../src/testing/repositories/fixtures.js";
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -105,6 +106,21 @@ describe("evaluation dashboard", () => {
     expect(screen.getByText("Harden parser boundary")).toBeInTheDocument();
     expect(screen.getByText("Agent PR")).toBeInTheDocument();
     expect(repository).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads an explicitly associated PR even when it is outside the bounded list page", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const sourceControl = new MockSourceControlClient();
+    sourceControl.pullRequests = async () => ({ items: [demoPullRequests[1]!] });
+    const pullRequest = vi.spyOn(sourceControl, "pullRequest");
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={sourceControl} />);
+
+    expect(await screen.findByText("Harden parser boundary")).toBeInTheDocument();
+    expect(screen.getByText("Agent PR")).toBeInTheDocument();
+    expect(pullRequest).toHaveBeenCalledWith(expect.objectContaining({ name: "orbit" }), 42, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("provides an explicit GitHub authentication recovery state", async () => {

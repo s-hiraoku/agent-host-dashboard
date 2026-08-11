@@ -12,6 +12,7 @@ import { relatePullRequests, repositoryKey, uniqueRepositoryLocators } from "../
 
 const maximumRepositories = 8;
 const maximumConcurrency = 3;
+const maximumPullRequests = 8;
 
 export interface RepositoryOverviewEntry {
   readonly repository: SourceControlRepository;
@@ -78,16 +79,21 @@ export function useRepositoryOverview(
         const selected = locators.slice(0, maximumRepositories);
         const entries = await mapLimited(selected, maximumConcurrency, async (locator) => {
           const associations = context.associations.filter((association) => repositoryKey(association.repository) === repositoryKey(locator));
-          const [repository, issues, pullRequests] = await Promise.all([
+          const explicitPullRequestNumbers = [...new Set(associations.flatMap((association) => association.kind === "confirmed" && association.pullRequest ? [association.pullRequest.number] : []))]
+            .slice(0, maximumPullRequests);
+          const [repository, issues, pullRequests, explicitPullRequests] = await Promise.all([
             sourceControl.repository(locator, { signal: controller.signal }),
             sourceControl.issues(locator, { states: ["open"], limit: 6 }, { signal: controller.signal }),
-            sourceControl.pullRequests(locator, { states: ["open"], limit: 8 }, { signal: controller.signal }),
+            sourceControl.pullRequests(locator, { states: ["open"], limit: maximumPullRequests }, { signal: controller.signal }),
+            mapLimited(explicitPullRequestNumbers, maximumConcurrency, async (number) => await sourceControl.pullRequest(locator, number, { signal: controller.signal })),
           ]);
+          const combinedPullRequests = new Map(pullRequests.items.map((pullRequest) => [pullRequest.number, pullRequest]));
+          for (const pullRequest of explicitPullRequests) combinedPullRequests.set(pullRequest.number, pullRequest);
           return {
             repository,
             associations,
             issues: issues.items,
-            pullRequests: relatePullRequests(associations, locator, pullRequests.items),
+            pullRequests: relatePullRequests(associations, locator, [...combinedPullRequests.values()]).slice(0, maximumPullRequests),
           };
         });
         if (!controller.signal.aborted) setState({ status: "ready", entries, truncated: locators.length > selected.length });
