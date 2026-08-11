@@ -139,6 +139,17 @@ describe("GitHubRestClient", () => {
     expect(page.items.every((item) => item.checks === "unknown" && item.review === "unknown")).toBe(true);
   });
 
+  it("loads an explicitly associated pull request by number", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toContain("/repos/example-labs/orbit/pulls/42");
+      return json(pullRequest(42, "open"));
+    });
+    const client = new GitHubRestClient({ fetch: fetcher, cacheTtlMs: 0 });
+
+    await expect(client.pullRequest(demoRepository.locator, 42)).resolves.toMatchObject({ number: 42, state: "open" });
+    await expect(client.pullRequest(demoRepository.locator, 0)).rejects.toThrow(/positive integer/);
+  });
+
   it("uses memory-only TTL and ETag revalidation", async () => {
     let now = 1_000;
     const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
@@ -180,6 +191,33 @@ describe("GitHubRestClient", () => {
     token = "second-transient-token";
     await expect(client.repository(demoRepository.locator)).resolves.toMatchObject({ locator: { repositoryId: "456" } });
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("rechecks cancellation after credential scoping before serving a warm cache", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => json({
+      id: 123,
+      html_url: demoRepository.url,
+      visibility: "private",
+      default_branch: "main",
+    }));
+    const client = new GitHubRestClient({
+      fetch: fetcher,
+      authentication: () => ({ scheme: "Bearer", token: "transient-cache-token" }),
+      cacheTtlMs: 60_000,
+    });
+    await client.repository(demoRepository.locator);
+    let finishDigest: (value: ArrayBuffer) => void = () => undefined;
+    const pendingDigest = new Promise<ArrayBuffer>((resolve) => { finishDigest = resolve; });
+    const digest = vi.spyOn(globalThis.crypto.subtle, "digest").mockImplementationOnce(async () => await pendingDigest);
+    const controller = new AbortController();
+
+    const pending = client.repository(demoRepository.locator, { signal: controller.signal });
+    controller.abort(new DOMException("cancelled", "AbortError"));
+    finishDigest(new Uint8Array(32).buffer);
+
+    await expect(pending).rejects.toMatchObject({ code: "aborted" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    digest.mockRestore();
   });
 
   it("maps authentication and rate-limit failures without exposing response bodies", async () => {

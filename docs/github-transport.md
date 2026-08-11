@@ -5,6 +5,7 @@
 - `GET /repos/{owner}/{repo}`
 - `GET /repos/{owner}/{repo}/issues`
 - `GET /repos/{owner}/{repo}/pulls`
+- `GET /repos/{owner}/{repo}/pulls/{pull_number}` for explicitly associated PRs
 
 The client pins `X-GitHub-Api-Version: 2026-03-10`, sends the recommended `application/vnd.github+json` media type, uses browser-compatible redirect following, and rejects a final response URL outside the configured API origin. Fetch strips credentials during a cross-origin redirect; the client then fails the request instead of decoding that response. Unconfigured hosts are rejected before requesting credentials. GitHub.com is configured by default. GitHub Enterprise requires an explicit host-to-HTTPS-API-endpoint mapping.
 

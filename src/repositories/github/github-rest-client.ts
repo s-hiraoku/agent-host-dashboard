@@ -320,8 +320,12 @@ export class GitHubRestClient implements SourceControlClient {
     try {
       credential = this.authentication?.(normalized.host);
       const scope = await credentialScope(credential?.token.trim() || undefined);
+      if (options?.signal?.aborted) {
+        throw new SourceControlError("aborted", "The GitHub request was cancelled.", { cause: options.signal.reason });
+      }
       key = `${scope}\n${initialUrl.toString()}`;
     } catch (cause) {
+      if (cause instanceof SourceControlError) throw cause;
       throw new SourceControlError("unavailable", "GitHub credentials are unavailable.", { cause });
     }
     const token = credential?.token.trim() || undefined;
@@ -389,6 +393,12 @@ export class GitHubRestClient implements SourceControlClient {
   async repository(locator: RepositoryLocator, options?: SourceControlRequestOptions): Promise<SourceControlRepository> {
     const response = await this.get<unknown>(locator, pathFor(locator), options);
     return decodeRepository(locator, response.data);
+  }
+
+  async pullRequest(locator: RepositoryLocator, number: number, options?: SourceControlRequestOptions): Promise<SourceControlPullRequest> {
+    if (!Number.isSafeInteger(number) || number < 1) throw new RangeError("pull request number must be a positive integer.");
+    const response = await this.get<unknown>(locator, pathFor(locator, `/pulls/${number}`), options);
+    return decodePullRequest(response.data);
   }
 
   async issues(
