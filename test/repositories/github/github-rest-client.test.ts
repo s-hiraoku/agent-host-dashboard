@@ -222,6 +222,31 @@ describe("GitHubRestClient", () => {
       retryable: true,
       retryAt: "2026-01-15T10:01:00.000Z",
     });
+
+    const combinedHeaders = new GitHubRestClient({
+      fetch: vi.fn<typeof fetch>(async () => json({ message: "secondary limit" }, {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "10", "x-ratelimit-reset": "1768474800", "retry-after": "60" },
+      })),
+      cacheTtlMs: 0,
+      now: () => Date.parse("2026-01-15T10:00:00.000Z"),
+    });
+    await expect(combinedHeaders.repository(demoRepository.locator)).rejects.toMatchObject({
+      code: "rate_limited",
+      retryAt: "2026-01-15T10:01:00.000Z",
+    });
+  });
+
+  it("uses browser-compatible redirects and rejects a cross-origin final URL", async () => {
+    const redirected = json({ id: 123, html_url: demoRepository.url, visibility: "public", default_branch: "main" });
+    Object.defineProperty(redirected, "url", { value: "https://elsewhere.example/repos/example-labs/orbit" });
+    const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.redirect).toBe("follow");
+      return redirected;
+    });
+    const client = new GitHubRestClient({ fetch: fetcher, cacheTtlMs: 0 });
+
+    await expect(client.repository(demoRepository.locator)).rejects.toMatchObject({ code: "invalid_response" });
   });
 
   it("omits rate-limit metadata when GitHub does not supply all headers", async () => {
@@ -244,5 +269,18 @@ describe("GitHubRestClient", () => {
     const pending = client.repository(demoRepository.locator, { signal: controller.signal });
     controller.abort(new DOMException("cancelled", "AbortError"));
     await expect(pending).rejects.toMatchObject({ code: "aborted" });
+  });
+
+  it("settles timeout while a custom response body reader ignores AbortSignal", async () => {
+    const response = {
+      ok: true,
+      status: 200,
+      url: "https://api.github.com/repos/example-labs/orbit",
+      headers: new Headers(headers),
+      json: () => new Promise<unknown>(() => undefined),
+    } as Response;
+    const client = new GitHubRestClient({ fetch: vi.fn<typeof fetch>(async () => response), requestTimeoutMs: 5 });
+
+    await expect(client.repository(demoRepository.locator)).rejects.toMatchObject({ code: "timeout", retryable: true });
   });
 });

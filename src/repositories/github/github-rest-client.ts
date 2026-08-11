@@ -119,17 +119,17 @@ function nextPageCursor(headers: Headers): string | undefined {
 }
 
 function retryAt(headers: Headers, now: number): string | undefined {
-  const resetHeader = headers.get("x-ratelimit-reset");
-  if (resetHeader !== null) {
-    const reset = Number(resetHeader);
-    if (Number.isFinite(reset)) return new Date(reset * 1_000).toISOString();
-  }
   const retryAfter = headers.get("retry-after");
-  if (!retryAfter) return undefined;
-  const seconds = Number(retryAfter);
-  if (Number.isFinite(seconds)) return new Date(now + Math.max(0, seconds) * 1_000).toISOString();
-  const parsed = Date.parse(retryAfter);
-  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) return new Date(now + Math.max(0, seconds) * 1_000).toISOString();
+    const parsed = Date.parse(retryAfter);
+    if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
+  }
+  const resetHeader = headers.get("x-ratelimit-reset");
+  if (resetHeader === null) return undefined;
+  const reset = Number(resetHeader);
+  return Number.isFinite(reset) ? new Date(reset * 1_000).toISOString() : undefined;
 }
 
 function errorForResponse(response: Response, now: number): SourceControlError {
@@ -339,26 +339,18 @@ export class GitHubRestClient implements SourceControlClient {
       });
       if (credential && token) headers.set("Authorization", `${credential.scheme} ${token}`);
       if (cached?.etag) headers.set("If-None-Match", cached.etag);
-      let url = initialUrl;
-      let response: Response | undefined;
       const aborted = new Promise<never>((_resolve, reject) => {
         rejectAbort = () => reject(deadline.signal.reason);
         deadline.signal.addEventListener("abort", rejectAbort, { once: true });
       });
-      for (let redirects = 0; redirects <= 3; redirects += 1) {
-        const fetchRequest = this.fetcher(url, { method: "GET", headers, signal: deadline.signal, redirect: "manual" });
-        response = await Promise.race([fetchRequest, aborted]);
-        if (![301, 302, 307, 308].includes(response.status)) break;
-        const location = response.headers.get("location");
-        if (!location) throw new SourceControlError("invalid_response", "GitHub redirect omitted its target.");
-        const redirected = new URL(location, url);
-        if (redirected.origin !== endpoint.origin) {
+      const fetchRequest = this.fetcher(initialUrl, { method: "GET", headers, signal: deadline.signal, redirect: "follow" });
+      const response = await Promise.race([fetchRequest, aborted]);
+      if (response.url) {
+        const finalUrl = new URL(response.url);
+        if (finalUrl.origin !== endpoint.origin) {
           throw new SourceControlError("invalid_response", "GitHub attempted a cross-origin redirect.");
         }
-        url = redirected;
       }
-      if (!response) throw new SourceControlError("unavailable", "GitHub did not return a response.", { retryable: true });
-      if ([301, 302, 307, 308].includes(response.status)) throw new SourceControlError("invalid_response", "GitHub redirected too many times.");
       if (response.status === 304 && cached) {
         const responseHeaders = new Headers(cached.headers);
         response.headers.forEach((value, name) => responseHeaders.set(name, value));
@@ -368,8 +360,9 @@ export class GitHubRestClient implements SourceControlClient {
       if (!response.ok) throw errorForResponse(response, this.now());
       let data: unknown;
       try {
-        data = await response.json();
+        data = await Promise.race([response.json(), aborted]);
       } catch (cause) {
+        if (deadline.signal.aborted) throw deadline.signal.reason;
         throw new SourceControlError("invalid_response", "GitHub returned invalid JSON.", { cause });
       }
       const etag = response.headers.get("etag") ?? undefined;
