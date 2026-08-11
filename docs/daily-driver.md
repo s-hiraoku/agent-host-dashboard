@@ -33,7 +33,9 @@ unavailable rather than being approximated from the current page.
 The Settings surface can create and disconnect a read-only GitHub session. It
 does not infer a repository from cwd: GitHub requests begin only when a
 `RepositoryContextSource` supplies an explicit association. The fixture connector
-uses sanitized source-control data without accepting a real credential.
+uses sanitized source-control data without accepting a real credential. A 401
+from an associated repository clears the GitHub vault and returns Settings to a
+disconnected recovery state so an expired token cannot remain labelled active.
 
 ## Persisted preferences
 

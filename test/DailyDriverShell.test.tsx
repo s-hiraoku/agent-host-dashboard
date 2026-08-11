@@ -9,9 +9,10 @@ import { DailyDriverShell } from "../src/daily/DailyDriverShell.js";
 import { LocalPreferenceStore, MemoryPreferenceStore, preferenceStorageKey } from "../src/daily/preferences.js";
 import type { ClientConnector, ClientLease, SourceControlClientFactory } from "../src/daily/session.js";
 import { AgentHostError } from "../src/errors.js";
+import { SourceControlError } from "../src/repositories/source-control.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
-import { MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
+import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
 
 class RecordingStorage {
   readonly values = new Map<string, string>();
@@ -112,6 +113,32 @@ describe("daily-driver shell", () => {
     expect(sourceControlFactory).not.toHaveBeenCalled();
     expect(screen.getByText("Enter a GitHub access token for this session.")).toBeInTheDocument();
     expect(input).toHaveValue("");
+  });
+
+  it("clears a rejected GitHub credential and returns Settings to recovery", async () => {
+    const rejected = new MockSourceControlClient();
+    const repository = vi.spyOn(rejected, "repository").mockRejectedValue(new SourceControlError("unauthorized", "Rejected test credential."));
+    let readCredential: (() => string | undefined) | undefined;
+    const user = userEvent.setup();
+    render(<DailyDriverShell
+      connector={{ async open() { return fixtureLease(); } }}
+      preferenceStore={new MemoryPreferenceStore()}
+      repositoryContext={new MockRepositoryContextSource()}
+      sourceControlFactory={(credential) => { readCredential = credential; return rejected; }}
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Connect securely" }));
+    await user.click(await screen.findByRole("button", { name: "Settings" }));
+    await user.type(screen.getByLabelText("GitHub access token"), "rejected-session-secret");
+    await user.click(screen.getByRole("button", { name: "Use for this session" }));
+    await user.click(screen.getAllByRole("button", { name: "Workspace" })[0]!);
+
+    await waitFor(() => expect(repository).toHaveBeenCalled());
+    await waitFor(() => expect(readCredential?.()).toBeUndefined());
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByText("disconnected")).toBeInTheDocument();
+    expect(screen.getByText("GitHub authentication failed. Enter a current token and try again.")).toBeInTheDocument();
+    expect(screen.getByLabelText("GitHub access token")).toHaveValue("");
   });
 
   it("restores non-secret preferences with an empty credential after reload", async () => {

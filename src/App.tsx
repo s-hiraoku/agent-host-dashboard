@@ -191,13 +191,18 @@ function RepositoryPanel({
   agentId,
   contextSource,
   sourceControl,
+  onAuthenticationFailure,
 }: {
   readonly agentId: string;
   readonly contextSource: RepositoryContextSource | undefined;
   readonly sourceControl: SourceControlClient | undefined;
+  readonly onAuthenticationFailure?: () => void;
 }) {
   const overview = useRepositoryOverview(agentId, contextSource, sourceControl);
   const state = overview.state;
+  useEffect(() => {
+    if (state.status === "error" && state.code === "unauthorized") onAuthenticationFailure?.();
+  }, [onAuthenticationFailure, state]);
   return (
     <section className="repository-panel" aria-labelledby="repository-heading" aria-busy={state.status === "loading"}>
       <div className="section-heading">
@@ -357,6 +362,7 @@ export interface DailyDriverControls {
     readonly error?: string;
     readonly onConnect?: (credential: string) => void;
     readonly onDisconnect?: () => void;
+    readonly onAuthenticationFailure?: () => void;
   };
 }
 
@@ -729,7 +735,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
                 <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
               </dl>
               <div className="capability-row"><span className="field-label">Public capabilities</span><div>{agentActions.filter((action) => model.detail?.capabilities[action]).map((action) => <span className="capability" key={action}>{action}</span>)}</div></div>
-              {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} />}
+              {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} {...(dailyDriver?.sourceControlSession?.onAuthenticationFailure ? { onAuthenticationFailure: dailyDriver.sourceControlSession.onAuthenticationFailure } : {})} />}
               <section className="timeline" aria-labelledby="timeline-heading">
                 <div className="section-heading"><div><p className="eyebrow">Semantic stream</p><h3 id="timeline-heading">Live events</h3></div><span className="live-indicator"><Activity aria-hidden="true" />Live</span></div>
                 <ol>

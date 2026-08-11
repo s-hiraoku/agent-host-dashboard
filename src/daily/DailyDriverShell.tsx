@@ -111,6 +111,14 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     setSourceControlError(undefined);
   };
 
+  const failSourceControlAuthentication = () => {
+    sourceControlCredentialVault.current?.clear();
+    sourceControlCredentialVault.current = undefined;
+    setActiveSourceControl(sourceControl);
+    setSourceControlConnected(false);
+    setSourceControlError("GitHub authentication failed. Enter a current token and try again.");
+  };
+
   const resetConnection = () => {
     attempt.current.controller.abort();
     attempt.current.vault?.clear();
@@ -236,6 +244,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
           status: sourceControlConnected ? "connected" : "disconnected",
           onConnect: connectSourceControl,
           onDisconnect: disconnectSourceControl,
+          onAuthenticationFailure: failSourceControlAuthentication,
           ...(sourceControlError ? { error: sourceControlError } : {}),
         } : sourceControl ? { status: "fixture" } : { status: "unsupported" },
       }} /></div>}
