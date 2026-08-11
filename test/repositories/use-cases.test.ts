@@ -64,6 +64,9 @@ describe("repository use cases", () => {
     })).toBe("repository_wide");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, repositoryWide)).toBe("repository_wide");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepositoryWithoutId, confirmed)).toBe("associated");
+    expect(pullRequestRelationship([
+      { ...demoRepositoryAssociations[1]!, repository: { ...demoRepository.locator, owner: " Example-Labs " } },
+    ], demoRepository.locator, { ...branchCandidate, head: { ...branchCandidate.head, owner: "example-labs" } })).toBe("candidate");
 
     const confirmedOnly = demoRepositoryAssociations.filter((association) => association.kind === "confirmed");
     expect(pullRequestRelationship(confirmedOnly, demoRepository.locator, repositoryWide)).toBe("repository_wide");

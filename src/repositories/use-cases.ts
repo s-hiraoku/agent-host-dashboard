@@ -84,7 +84,7 @@ export function pullRequestRelationship(
     const branch = association.checkout?.branch;
     if (association.kind === "candidate" && association.reason === "repository_match") return "candidate";
     const sameHeadOwner = pullRequest.head.owner !== undefined
-      && pullRequest.head.owner.toLowerCase() === association.repository.owner.toLowerCase();
+      && pullRequest.head.owner.trim().toLowerCase() === normalizeRepositoryLocator(association.repository).owner.toLowerCase();
     if (association.kind === "candidate" && association.reason === "branch_match" && branch === pullRequest.head.branch && sameHeadOwner) {
       return "candidate";
     }

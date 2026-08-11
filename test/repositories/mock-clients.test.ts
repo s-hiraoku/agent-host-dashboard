@@ -26,6 +26,9 @@ describe("sanitized repository clients", () => {
       items: [{ number: 42, checks: "passing", review: "approved" }],
     });
     await expect(client.pullRequest(demoRepository.locator, 42)).resolves.toMatchObject({ number: 42, title: "Harden parser boundary" });
+    await expect(client.pullRequests(demoRepository.locator, { query: "INVESTIGATE" })).resolves.toMatchObject({
+      items: [{ number: 41 }],
+    });
     await expect(client.pullRequests(demoRepository.locator, { limit: 101 })).rejects.toThrow(/1 to 100/);
   });
 

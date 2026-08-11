@@ -71,10 +71,10 @@ export class MockSourceControlClient implements SourceControlClient {
     boundedSourceControlRequest(request);
     const all = this.issuesByRepository.get(repositoryKey(locator));
     if (!all) throw new SourceControlError("not_found", "The sanitized repository was not found.", { status: 404 });
-    const query = request.query?.toLocaleLowerCase();
+    const query = request.query?.toLowerCase();
     const filtered = all
       .filter((issue) => !request.states || request.states.includes(issue.state))
-      .filter((issue) => !query || issue.title.toLocaleLowerCase().includes(query));
+      .filter((issue) => !query || issue.title.toLowerCase().includes(query));
     return page(filtered, request.cursor, request.limit);
   }
 
@@ -87,11 +87,11 @@ export class MockSourceControlClient implements SourceControlClient {
     boundedSourceControlRequest(request);
     const all = this.pullRequestsByRepository.get(repositoryKey(locator));
     if (!all) throw new SourceControlError("not_found", "The sanitized repository was not found.", { status: 404 });
-    const query = request.query?.toLocaleLowerCase();
+    const query = request.query?.toLowerCase();
     const filtered = all
       .filter((pullRequest) => !request.states || request.states.includes(pullRequest.state))
       .filter((pullRequest) => request.draft === undefined || pullRequest.draft === request.draft)
-      .filter((pullRequest) => !query || pullRequest.title.toLocaleLowerCase().includes(query));
+      .filter((pullRequest) => !query || pullRequest.title.toLowerCase().includes(query));
     return page(filtered, request.cursor, request.limit);
   }
 }
