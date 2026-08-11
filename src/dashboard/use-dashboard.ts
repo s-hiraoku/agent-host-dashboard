@@ -15,7 +15,7 @@ import type {
   ApiInfo,
 } from "../domain.js";
 import { toAgentHostError } from "../errors.js";
-import { applyVisibleEvent, reconcileVisibleEvents } from "./use-cases.js";
+import { appendBoundedEvent, applyVisibleEvent, reconcileVisibleEvents, replayableEvents, type BoundedEventBuffer } from "./use-cases.js";
 
 const pageSize = 50;
 
@@ -119,7 +119,8 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const requestGeneration = useRef(0);
   const detailRequestGeneration = useRef(0);
   const requestController = useRef<AbortController | undefined>(undefined);
-  const eventBuffer = useRef<readonly AgentEvent[]>([]);
+  const eventBuffer = useRef<BoundedEventBuffer>({ entries: [], droppedThroughOrdinal: 0 });
+  const eventOrdinal = useRef(0);
   const visibleAgentIds = useRef(new Set<string>());
   const selectedIdRef = useRef<string | undefined>(undefined);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -137,6 +138,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
     requestController.current = controller;
     setLoading(true);
     try {
+      const replayAfterOrdinal = eventOrdinal.current;
       const [nextApiInfo, nextSnapshot, nextHealth] = await Promise.all([
         client.discover({ signal: controller.signal }),
         client.snapshot(requestFor(queryRef.current, cursorRef.current), { signal: controller.signal }),
@@ -145,7 +147,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       if (generation !== requestGeneration.current) return;
       const reconciledSnapshot = reconcileVisibleEvents(
         nextSnapshot,
-        eventBuffer.current,
+        replayableEvents(eventBuffer.current, replayAfterOrdinal),
         (agent) => matchesQuery(agent, queryRef.current),
       );
       setSnapshot(reconciledSnapshot);
@@ -216,8 +218,8 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         if (event.type === "agent.upserted") {
           const matches = matchesQuery(event.agent, queryRef.current);
           const visible = visibleAgentIds.current.has(event.agent.id);
-          if (!visible) scheduleReload();
-          else if (visible && !matches) visibleAgentIds.current.delete(event.agent.id);
+          if (!visible || !matches) scheduleReload();
+          if (visible && !matches) visibleAgentIds.current.delete(event.agent.id);
           if (event.agent.id === selectedIdRef.current) setDetailGeneration((current) => current + 1);
           const previousStatus = knownStatuses.current.get(event.agent.id);
           knownStatuses.current.set(event.agent.id, event.agent.status);
@@ -237,7 +239,9 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
         } else if (event.type === "action.completed" && event.agentId === selectedIdRef.current) {
           setDetailGeneration((current) => current + 1);
         }
-        eventBuffer.current = [...eventBuffer.current, event].slice(-500);
+        const ordinal = eventOrdinal.current + 1;
+        eventOrdinal.current = ordinal;
+        eventBuffer.current = appendBoundedEvent(eventBuffer.current, ordinal, event);
         setEvents((current) => [event, ...current].slice(0, 100));
         setSnapshot((current) =>
           current ? applyVisibleEvent(current, event, (agent) => matchesQuery(agent, queryRef.current)) : current,

@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentSnapshot, AgentStatus, AgentSummary } from "../domain.js";
+import { AgentHostError } from "../errors.js";
 
 export const statusOrder: readonly AgentStatus[] = ["blocked", "error", "working", "idle", "done", "unknown"];
 
@@ -6,6 +7,36 @@ export interface StatusMetric {
   readonly status: AgentStatus;
   readonly count: number;
   readonly urgent: boolean;
+}
+
+export interface BoundedEventBuffer {
+  readonly entries: readonly { readonly ordinal: number; readonly event: AgentEvent }[];
+  readonly droppedThroughOrdinal: number;
+}
+
+export function appendBoundedEvent(
+  buffer: BoundedEventBuffer,
+  ordinal: number,
+  event: AgentEvent,
+  limit = 500,
+): BoundedEventBuffer {
+  const entries = [...buffer.entries, { ordinal, event }];
+  const overflow = Math.max(0, entries.length - limit);
+  return {
+    entries: overflow ? entries.slice(overflow) : entries,
+    droppedThroughOrdinal: overflow ? entries[overflow - 1]!.ordinal : buffer.droppedThroughOrdinal,
+  };
+}
+
+export function replayableEvents(buffer: BoundedEventBuffer, afterOrdinal: number): readonly AgentEvent[] {
+  if (buffer.droppedThroughOrdinal > afterOrdinal) {
+    throw new AgentHostError(
+      "revision_gap",
+      "Live updates outpaced the bounded snapshot replay buffer. Refresh to resynchronize.",
+      { retryable: true },
+    );
+  }
+  return buffer.entries.filter((entry) => entry.ordinal > afterOrdinal).map((entry) => entry.event);
 }
 
 export function statusMetrics(snapshot: AgentSnapshot | undefined): readonly StatusMetric[] {

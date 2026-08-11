@@ -246,6 +246,26 @@ describe("evaluation dashboard", () => {
     expect(screen.getByText("50 shown of 1001")).toBeInTheDocument();
   });
 
+  it("reloads a bounded page when a visible agent leaves the active filter", async () => {
+    let releaseEvent: () => void = () => undefined;
+    const transport = new MockAgentHostTransport();
+    transport.eventStreamGate = new Promise<void>((resolve) => { releaseEvent = resolve; });
+    const snapshot = vi.spyOn(transport, "snapshot");
+    const { user } = renderDashboard(transport);
+    await user.selectOptions(await screen.findByLabelText("Status"), "working");
+    const target = transport.currentSnapshot.agents.find((agent) => agent.status === "working")!;
+    transport.eventStreams = [[{
+      type: "agent.upserted",
+      revision: 41,
+      agent: { ...target, status: "done" },
+    }]];
+    const callsBeforeEvent = snapshot.mock.calls.length;
+
+    releaseEvent();
+
+    await waitFor(() => expect(snapshot.mock.calls.length).toBeGreaterThan(callsBeforeEvent));
+  });
+
   it("does not refetch selected detail for unrelated connection events", async () => {
     let releaseEvents: () => void = () => undefined;
     const transport = new MockAgentHostTransport();

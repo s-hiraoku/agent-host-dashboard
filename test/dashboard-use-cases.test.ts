@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendBoundedEvent,
   applyVisibleEvent,
   findAttentionAgent,
   providerMetrics,
   reconcileVisibleEvents,
+  replayableEvents,
   statusMetrics,
   formatActivity,
+  type BoundedEventBuffer,
 } from "../src/dashboard/use-cases.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 
@@ -84,6 +87,16 @@ describe("dashboard use cases", () => {
     expect(updated.facets).toBeUndefined();
     expect(updated.agents).toEqual(snapshot.agents);
     expect(updated.revision).toBe(41);
+  });
+
+  it("rejects snapshot replay when the bounded event buffer overflowed after the request began", () => {
+    let buffer: BoundedEventBuffer = { entries: [], droppedThroughOrdinal: 0 };
+    for (let ordinal = 1; ordinal <= 501; ordinal += 1) {
+      buffer = appendBoundedEvent(buffer, ordinal, { type: "heartbeat", revision: 40 + ordinal });
+    }
+
+    expect(() => replayableEvents(buffer, 0)).toThrow(/outpaced the bounded snapshot replay buffer/);
+    expect(replayableEvents(buffer, 1)).toHaveLength(500);
   });
 
   it("decrements total while invalidating facets for an off-page removal", () => {

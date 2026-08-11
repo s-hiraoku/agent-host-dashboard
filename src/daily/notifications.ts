@@ -50,20 +50,22 @@ export class BrowserNotificationGateway implements NotificationGateway {
 }
 
 type CoordinationMessage =
-  | { readonly type: "hello" | "present" | "bye"; readonly tabId: string }
+  | { readonly type: "contend"; readonly key: string; readonly tabId: string }
   | { readonly type: "delivered"; readonly key: string };
 
 function coordinationMessage(value: unknown): CoordinationMessage | undefined {
   if (!value || typeof value !== "object") return undefined;
   const input = value as Record<string, unknown>;
-  if ((input.type === "hello" || input.type === "present" || input.type === "bye") && typeof input.tabId === "string") return { type: input.type, tabId: input.tabId };
+  if (input.type === "contend" && typeof input.key === "string" && typeof input.tabId === "string") {
+    return { type: "contend", key: input.key, tabId: input.tabId };
+  }
   if (input.type === "delivered" && typeof input.key === "string") return { type: "delivered", key: input.key };
   return undefined;
 }
 
 export class BrowserNotificationCoordinator implements NotificationCoordinator {
   private readonly tabId: string;
-  private readonly peers = new Set<string>();
+  private readonly contenders = new Map<string, Set<string>>();
   private readonly delivered = new Set<string>();
   private readonly channel: NotificationChannel | undefined;
   private closed = false;
@@ -76,14 +78,15 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
       this.channel.onmessage = (event) => {
         const message = coordinationMessage(event.data);
         if (!message) return;
-        if (message.type === "delivered") this.rememberDelivered(message.key);
-        else if (message.type === "bye") this.peers.delete(message.tabId);
-        else if (message.tabId !== this.tabId) {
-          this.peers.add(message.tabId);
-          if (message.type === "hello") this.channel?.postMessage({ type: "present", tabId: this.tabId } satisfies CoordinationMessage);
+        if (message.type === "delivered") {
+          this.contenders.delete(message.key);
+          this.rememberDelivered(message.key);
+        } else {
+          const peers = this.contenders.get(message.key) ?? new Set<string>();
+          peers.add(message.tabId);
+          this.contenders.set(message.key, peers);
         }
       };
-      this.channel.postMessage({ type: "hello", tabId: this.tabId } satisfies CoordinationMessage);
     }
   }
 
@@ -105,11 +108,16 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
       operation();
       return;
     }
+    const contenders = this.contenders.get(key) ?? new Set<string>();
+    contenders.add(this.tabId);
+    this.contenders.set(key, contenders);
+    this.channel.postMessage({ type: "contend", key, tabId: this.tabId } satisfies CoordinationMessage);
     await new Promise((resolve) => setTimeout(resolve, this.settleMs));
     if (this.closed) return;
     if (this.delivered.has(key)) return;
-    const owner = [...this.peers, this.tabId].sort()[0];
+    const owner = [...(this.contenders.get(key) ?? [this.tabId])].sort()[0];
     if (owner !== this.tabId) return;
+    this.contenders.delete(key);
     this.rememberDelivered(key);
     this.channel.postMessage({ type: "delivered", key } satisfies CoordinationMessage);
     operation();
@@ -118,7 +126,7 @@ export class BrowserNotificationCoordinator implements NotificationCoordinator {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.channel?.postMessage({ type: "bye", tabId: this.tabId } satisfies CoordinationMessage);
+    this.contenders.clear();
     if (this.channel) this.channel.onmessage = null;
     this.channel?.close();
   }

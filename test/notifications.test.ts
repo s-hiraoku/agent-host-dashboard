@@ -64,6 +64,30 @@ describe("daily-driver notifications", () => {
     right.close();
   });
 
+  it("does not let a non-contending tab suppress a notification", async () => {
+    class MemoryChannel {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      peer: MemoryChannel | undefined;
+      postMessage(message: unknown) {
+        this.peer?.onmessage?.({ data: message } as MessageEvent<unknown>);
+      }
+      close() {}
+    }
+    const unrelatedChannel = new MemoryChannel();
+    const contenderChannel = new MemoryChannel();
+    unrelatedChannel.peer = contenderChannel;
+    contenderChannel.peer = unrelatedChannel;
+    const unrelated = new BrowserNotificationCoordinator({ tabId: "a", channel: unrelatedChannel, settleMs: 0 });
+    const contender = new BrowserNotificationCoordinator({ tabId: "b", channel: contenderChannel, settleMs: 0 });
+    let deliveries = 0;
+
+    await contender.runOnce("host-b:41:blocked", () => { deliveries += 1; });
+
+    expect(deliveries).toBe(1);
+    unrelated.close();
+    contender.close();
+  });
+
   it("cancels a pending delivery when its coordinator closes", async () => {
     class ClosingChannel {
       onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
