@@ -9,6 +9,8 @@ import {
 } from "../../src/repositories/use-cases.js";
 import { demoPullRequests, demoRepository, demoRepositoryAssociations } from "../../src/testing/repositories/fixtures.js";
 
+const { repositoryId: _repositoryId, ...demoRepositoryWithoutId } = demoRepository.locator;
+
 describe("repository use cases", () => {
   it("normalizes structured locators without parsing repository URLs", () => {
     const locator = normalizeRepositoryLocator({
@@ -19,11 +21,11 @@ describe("repository use cases", () => {
     });
 
     expect(locator).toEqual({ service: "github", host: "github.com", owner: "Example-Labs", name: "orbit" });
-    expect(repositoryKey(locator)).toBe("github:github.com:path:example-labs:orbit");
+    expect(repositoryKey(locator)).toBe("github:github.com:example-labs:orbit");
     expect(() => normalizeRepositoryLocator({ service: "github", host: "github.com", owner: "../private", name: "orbit" }))
       .toThrow(/one repository locator segment/);
     expect(repositoryKey({ ...locator, repositoryId: "R_demo_1" }))
-      .toBe("github:github.com:id:r_demo_1");
+      .toBe("github:github.com:example-labs:orbit");
   });
 
   it("enforces bounded pagination and search inputs", () => {
@@ -35,6 +37,10 @@ describe("repository use cases", () => {
 
   it("deduplicates repository work before source-control queries", () => {
     expect(uniqueRepositoryLocators(demoRepositoryAssociations)).toEqual([demoRepository.locator]);
+    expect(uniqueRepositoryLocators([
+      demoRepositoryAssociations[0]!,
+      { ...demoRepositoryAssociations[0]!, repository: demoRepositoryWithoutId },
+    ])).toHaveLength(1);
   });
 
   it("never presents repository or branch inference as a confirmed PR association", () => {
@@ -45,6 +51,7 @@ describe("repository use cases", () => {
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, confirmed)).toBe("associated");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, branchCandidate)).toBe("candidate");
     expect(pullRequestRelationship(demoRepositoryAssociations, demoRepository.locator, repositoryWide)).toBe("repository_wide");
+    expect(pullRequestRelationship(demoRepositoryAssociations, demoRepositoryWithoutId, confirmed)).toBe("associated");
 
     const confirmedOnly = demoRepositoryAssociations.filter((association) => association.kind === "confirmed");
     expect(pullRequestRelationship(confirmedOnly, demoRepository.locator, repositoryWide)).toBe("repository_wide");

@@ -35,10 +35,7 @@ export function normalizeRepositoryLocator(locator: RepositoryLocator): Reposito
 
 export function repositoryKey(locator: RepositoryLocator): string {
   const normalized = normalizeRepositoryLocator(locator);
-  const identity = normalized.repositoryId === undefined
-    ? ["path", normalized.owner, normalized.name]
-    : ["id", normalized.repositoryId];
-  return [normalized.service, normalized.host, ...identity]
+  return [normalized.service, normalized.host, normalized.owner, normalized.name]
     .map((segment) => segment.toLocaleLowerCase())
     .join(":");
 }
