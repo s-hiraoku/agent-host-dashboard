@@ -1,5 +1,5 @@
 import { KeyRound, LockKeyhole, RotateCcw, Server, ShieldAlert, WifiOff } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { App } from "../App.js";
 import { normalizeAgentHostBaseUrl } from "../http/fetch-channel.js";
 import type { RepositoryContextSource } from "../repositories/context-source.js";
@@ -111,13 +111,13 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     setSourceControlError(undefined);
   };
 
-  const failSourceControlAuthentication = () => {
+  const failSourceControlAuthentication = useCallback(() => {
     sourceControlCredentialVault.current?.clear();
     sourceControlCredentialVault.current = undefined;
     setActiveSourceControl(sourceControl);
     setSourceControlConnected(false);
     setSourceControlError("GitHub authentication failed. Enter a current token and try again.");
-  };
+  }, [sourceControl]);
 
   const resetConnection = () => {
     attempt.current.controller.abort();
