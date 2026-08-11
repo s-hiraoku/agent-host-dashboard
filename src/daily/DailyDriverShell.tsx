@@ -210,7 +210,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
           {connecting && <button className="secondary-button" type="button" onClick={cancelAttempt}>Cancel connection attempt</button>}
           {lease && <button className="secondary-button" type="button" onClick={returnToWorkspace}>Return to current workspace</button>}
         </form>
-        <div className="privacy-note"><LockKeyhole aria-hidden="true" /><p><strong>Memory-only credential.</strong> The token is cleared from the form immediately and is never written to localStorage, URLs, diagnostics, or build output. Reloading requires authentication again.</p></div>
+        <div className="privacy-note"><LockKeyhole aria-hidden="true" /><p><strong>Memory-only credential.</strong> The token is cleared from the form immediately and is never written to localStorage, URLs, diagnostics, or build output. Reloading a direct connection requires authentication again.</p></div>
         <details><summary>Connection requirements</summary><ul><li>Loopback HTTP or same-origin endpoint</li><li>A supported versioned public API</li><li>No provider-specific metadata dependency</li></ul></details>
       </section>
     </main>}

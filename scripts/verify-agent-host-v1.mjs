@@ -69,7 +69,7 @@ const observed = await Promise.race([
   nextEvent,
   new Promise((_, reject) => setTimeout(() => reject(new Error("semantic action event timed out")), 2_000)),
 ]);
-if (observed.done || observed.value.type !== "action.completed" || observed.value.agentId !== idle.id || observed.value.actionId.length === 0) {
+if (observed.done || observed.value.type !== "action.completed" || observed.value.agentId !== idle.id || observed.value.actionId !== prompt.actionId) {
   throw new Error("expected one correlated action.completed event");
 }
 await client.action(blocked, { kind: "approve", approvalId: blocked.pendingApprovals[0].id });
