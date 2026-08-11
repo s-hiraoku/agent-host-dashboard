@@ -314,7 +314,8 @@ export class GitHubRestClient implements SourceControlClient {
     if (options?.signal?.aborted) {
       throw new SourceControlError("aborted", "The GitHub request was cancelled.", { cause: options.signal.reason });
     }
-    const initialUrl = new URL(`${endpoint.pathname.replace(/\/$/u, "")}${path}`, endpoint.origin);
+    const initialUrl = new URL(endpoint);
+    initialUrl.pathname = `${endpoint.pathname.replace(/\/$/u, "")}${path}`;
     let credential: GitHubCredential | undefined;
     let key: string;
     try {

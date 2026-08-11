@@ -50,6 +50,27 @@ describe("GitHubRestClient", () => {
     expect(() => new GitHubRestClient({ cacheMaxEntries: 0 })).toThrow(/positive/);
   });
 
+  it("keeps requests on the configured origin when an endpoint path contains two slashes", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe("https://ghe.example//repos/acme/widgets");
+      return json({
+        id: 123,
+        html_url: "https://ghe.example/acme/widgets",
+        visibility: "private",
+        default_branch: "main",
+      });
+    });
+    const client = new GitHubRestClient({
+      endpoints: [{ host: "ghe.example", baseUrl: "https://ghe.example//" }],
+      authentication: () => ({ scheme: "Bearer", token: "memory-only" }),
+      fetch: fetcher,
+    });
+
+    await client.repository({ service: "github", host: "ghe.example", owner: "acme", name: "widgets" });
+
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("injects an ephemeral bearer credential only after host validation", async () => {
     const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
       const sent = new Headers(init?.headers);
