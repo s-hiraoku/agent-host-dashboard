@@ -28,7 +28,7 @@ export interface GitHubApiEndpoint {
 }
 
 export interface GitHubRestClientOptions {
-  readonly authentication?: () => GitHubCredential | undefined;
+  readonly authentication?: (host: string) => GitHubCredential | undefined;
   readonly endpoints?: readonly GitHubApiEndpoint[];
   readonly fetch?: typeof fetch;
   readonly apiVersion?: string;
@@ -89,9 +89,13 @@ function queryState(states: readonly string[] | undefined): string {
 }
 
 function rateLimit(headers: Headers): SourceControlRateLimit | undefined {
-  const remaining = Number(headers.get("x-ratelimit-remaining"));
-  const limit = Number(headers.get("x-ratelimit-limit"));
-  const reset = Number(headers.get("x-ratelimit-reset"));
+  const remainingHeader = headers.get("x-ratelimit-remaining");
+  const limitHeader = headers.get("x-ratelimit-limit");
+  const resetHeader = headers.get("x-ratelimit-reset");
+  if (remainingHeader === null || limitHeader === null || resetHeader === null) return undefined;
+  const remaining = Number(remainingHeader);
+  const limit = Number(limitHeader);
+  const reset = Number(resetHeader);
   if (![remaining, limit, reset].every(Number.isFinite)) return undefined;
   return { remaining, limit, resetsAt: new Date(reset * 1_000).toISOString() };
 }
@@ -115,8 +119,11 @@ function nextPageCursor(headers: Headers): string | undefined {
 }
 
 function retryAt(headers: Headers, now: number): string | undefined {
-  const reset = Number(headers.get("x-ratelimit-reset"));
-  if (Number.isFinite(reset)) return new Date(reset * 1_000).toISOString();
+  const resetHeader = headers.get("x-ratelimit-reset");
+  if (resetHeader !== null) {
+    const reset = Number(resetHeader);
+    if (Number.isFinite(reset)) return new Date(reset * 1_000).toISOString();
+  }
   const retryAfter = headers.get("retry-after");
   if (!retryAfter) return undefined;
   const seconds = Number(retryAfter);
@@ -133,7 +140,7 @@ function errorForResponse(response: Response, now: number): SourceControlError {
   };
   if (response.status === 401) return new SourceControlError("unauthorized", "GitHub authentication failed.", common);
   if (response.status === 404) return new SourceControlError("not_found", "The GitHub resource was not found.", common);
-  if (response.status === 429 || (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0")) {
+  if (response.status === 429 || (response.status === 403 && (response.headers.get("x-ratelimit-remaining") === "0" || response.headers.has("retry-after")))) {
     const availableAt = retryAt(response.headers, now);
     return new SourceControlError("rate_limited", "GitHub rate limit reached.", {
       ...common,
@@ -246,7 +253,7 @@ function decodePullRequest(value: unknown): SourceControlPullRequest {
 }
 
 export class GitHubRestClient implements SourceControlClient {
-  private readonly authentication: (() => GitHubCredential | undefined) | undefined;
+  private readonly authentication: ((host: string) => GitHubCredential | undefined) | undefined;
   private readonly fetcher: typeof fetch;
   private readonly apiVersion: string;
   private readonly requestTimeoutMs: number;
@@ -302,7 +309,8 @@ export class GitHubRestClient implements SourceControlClient {
   }
 
   private async get<T>(locator: RepositoryLocator, path: string, options?: SourceControlRequestOptions): Promise<GitHubResponse<T>> {
-    const endpoint = this.endpoint(locator);
+    const normalized = normalizeRepositoryLocator(locator);
+    const endpoint = this.endpoint(normalized);
     if (options?.signal?.aborted) {
       throw new SourceControlError("aborted", "The GitHub request was cancelled.", { cause: options.signal.reason });
     }
@@ -310,7 +318,7 @@ export class GitHubRestClient implements SourceControlClient {
     let credential: GitHubCredential | undefined;
     let key: string;
     try {
-      credential = this.authentication?.();
+      credential = this.authentication?.(normalized.host);
       const scope = await credentialScope(credential?.token.trim() || undefined);
       key = `${scope}\n${initialUrl.toString()}`;
     } catch (cause) {

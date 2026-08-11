@@ -69,12 +69,36 @@ describe("GitHubRestClient", () => {
       locator: { repositoryId: "123" },
       defaultBranch: "main",
     });
-    expect(authentication).toHaveBeenCalledTimes(1);
+    expect(authentication).toHaveBeenCalledWith("github.com");
 
     const foreign = { ...demoRepository.locator, host: "unconfigured.example" };
     await expect(client.repository(foreign)).rejects.toMatchObject({ code: "unsupported_host" });
     expect(authentication).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects credentials for the validated repository host", async () => {
+    const authentication = vi.fn((host: string) => ({ scheme: "Bearer" as const, token: `${host}-token` }));
+    const authorizations: string[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+      return json({ id: 123, html_url: `https://${url.host}/example-labs/orbit`, visibility: "private", default_branch: "main" });
+    });
+    const client = new GitHubRestClient({
+      authentication,
+      fetch: fetcher,
+      endpoints: [
+        { host: "github.com", baseUrl: "https://api.github.com" },
+        { host: "github.example", baseUrl: "https://github.example/api/v3" },
+      ],
+    });
+
+    await client.repository(demoRepository.locator);
+    await client.repository({ ...demoRepository.locator, host: "github.example" });
+
+    expect(authentication.mock.calls.map(([host]) => host)).toEqual(["github.com", "github.example"]);
+    expect(authorizations).toEqual(["Bearer github.com-token", "Bearer github.example-token"]);
   });
 
   it("lists Issues without misclassifying pull requests returned by the Issues endpoint", async () => {
@@ -184,6 +208,29 @@ describe("GitHubRestClient", () => {
       retryable: true,
       retryAt: "2026-01-15T10:00:00.000Z",
     });
+
+    const secondaryLimited = new GitHubRestClient({
+      fetch: vi.fn<typeof fetch>(async () => json({ message: "secondary limit" }, {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "10", "retry-after": "60" },
+      })),
+      cacheTtlMs: 0,
+      now: () => Date.parse("2026-01-15T10:00:00.000Z"),
+    });
+    await expect(secondaryLimited.repository(demoRepository.locator)).rejects.toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      retryAt: "2026-01-15T10:01:00.000Z",
+    });
+  });
+
+  it("omits rate-limit metadata when GitHub does not supply all headers", async () => {
+    const client = new GitHubRestClient({
+      fetch: vi.fn<typeof fetch>(async () => json([issue(17)], { headers: { "x-ratelimit-remaining": "10" } })),
+      cacheTtlMs: 0,
+    });
+
+    await expect(client.issues(demoRepository.locator)).resolves.not.toHaveProperty("rateLimit");
   });
 
   it("settles timeout and caller cancellation even when fetch ignores AbortSignal", async () => {

@@ -10,7 +10,7 @@ The client pins `X-GitHub-Api-Version: 2026-03-10`, sends the recommended `appli
 
 ## Authentication
 
-Authentication is an ephemeral callback evaluated immediately before a network request. The client never accepts a token in repository/domain objects, never persists it, and does not include upstream response bodies in structured errors. A future onboarding surface must keep the credential in the current in-memory connection lease and request only the minimum read permissions required for repository metadata, Issues, and pull requests.
+Authentication is an ephemeral, host-keyed callback evaluated immediately before a network request. Host validation runs first, so a credential is never requested for an unconfigured origin and GitHub Enterprise credentials can remain isolated from GitHub.com. The client never accepts a token in repository/domain objects, never persists it, and does not include upstream response bodies in structured errors. A future onboarding surface must keep the credential in the current in-memory connection lease and request only the minimum read permissions required for repository metadata, Issues, and pull requests.
 
 ## Caching and rate limits
 
