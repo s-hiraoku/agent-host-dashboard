@@ -32,7 +32,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
 import { agentActions, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
@@ -352,6 +352,12 @@ export interface DailyDriverControls {
   readonly notificationCoordinator: NotificationCoordinator;
   readonly notificationNamespace: string;
   readonly environmentNotice?: string;
+  readonly sourceControlSession?: {
+    readonly status: "connected" | "disconnected" | "fixture" | "unsupported";
+    readonly error?: string;
+    readonly onConnect?: (credential: string) => void;
+    readonly onDisconnect?: () => void;
+  };
 }
 
 function SettingsSurface({ controls, onWorkspace, notificationPermission, notificationError, onRequestNotifications, providers, projects, mutedProviders, mutedProjects, onToggleProvider, onToggleProject }: {
@@ -369,6 +375,15 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
 }) {
   const update = (patch: Partial<DashboardPreferences>) => controls.onPreferencesChange((current) => ({ ...current, ...patch }));
   const updateNotifications = (patch: Partial<DashboardPreferences["notifications"]>) => controls.onPreferencesChange((current) => ({ ...current, notifications: { ...current.notifications, ...patch } }));
+  const connectSourceControl = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const token = typeof data.get("github-credential") === "string" ? String(data.get("github-credential")) : "";
+    data.delete("github-credential");
+    form.reset();
+    controls.sourceControlSession?.onConnect?.(token);
+  };
   return (
     <main id="main-content" tabIndex={-1} className="settings-workspace">
       <header className="settings-heading"><div><p className="eyebrow">Daily-driver preferences</p><h1>Settings</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
@@ -397,6 +412,16 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
         <dl><div><dt>Endpoint</dt><dd className="mono">{controls.preferences.endpoint}</dd></div><div><dt>Credential</dt><dd>Memory only · cleared on disconnect or reload</dd></div></dl>
         <button className="danger-button" type="button" onClick={controls.onReconnect}>Change connection</button>
       </section>
+      {controls.sourceControlSession && <section className="settings-card" aria-labelledby="github-settings-heading">
+        <div><p className="eyebrow">Repository operations</p><h2 id="github-settings-heading">GitHub read-only session</h2><p>Loads repositories, open Issues, and pull requests only after agent-host exposes an explicit repository association.</p></div>
+        <dl><div><dt>Status</dt><dd>{controls.sourceControlSession.status === "fixture" ? "Sanitized fixture" : controls.sourceControlSession.status === "unsupported" ? "Not configured" : controls.sourceControlSession.status}</dd></div><div><dt>Credential</dt><dd>Memory only · cleared on disconnect or reload</dd></div></dl>
+        {controls.sourceControlSession.onConnect && controls.sourceControlSession.status === "disconnected" && <form className="source-control-form" onSubmit={connectSourceControl}>
+          <label htmlFor="github-credential"><span>GitHub access token</span><input id="github-credential" name="github-credential" type="password" autoComplete="off" spellCheck={false} required /></label>
+          <button className="primary-button" type="submit">Use for this session</button>
+        </form>}
+        {controls.sourceControlSession.onDisconnect && controls.sourceControlSession.status === "connected" && <button className="danger-button" type="button" onClick={controls.sourceControlSession.onDisconnect}>Disconnect GitHub</button>}
+        <p className="action-message" aria-live="polite">{controls.sourceControlSession.error ?? ""}</p>
+      </section>}
       <section className="settings-card"><div><p className="eyebrow">Keyboard-first operation</p><h2>Shortcuts</h2></div><dl><div><dt className="mono">/</dt><dd>Focus agent search from the workspace</dd></div><div><dt>Tab / Shift+Tab</dt><dd>Move through semantic controls and explicit action review</dd></div></dl></section>
     </main>
   );

@@ -392,6 +392,8 @@ dd { margin: 0; overflow: hidden; color: var(--text); font-size: 0.76rem; text-o
 .diagnostics-grid dd { margin: 0.25rem 0 0; overflow-wrap: anywhere; }
 .privacy-card { grid-column: 1 / -1; grid-template-columns: auto 1fr; }
 .privacy-card > svg { width: 1.35rem; color: var(--green); }
+.source-control-form { display: grid; gap: 0.65rem; }
+.source-control-form label { display: grid; gap: 0.35rem; }
 
 @keyframes spin { to { transform: rotate(1turn); } }
 
