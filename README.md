@@ -25,6 +25,8 @@ ports: `RepositoryContextSource` for agent-to-repository association and
 `SourceControlClient` for read-only forge queries. The separation prevents the
 dashboard from inventing fields that are not present in the confirmed agent-host
 API. See [docs/architecture/repository-context.md](docs/architecture/repository-context.md).
+The read-only GitHub REST adapter and its authentication/cache limits are
+documented in [docs/github-transport.md](docs/github-transport.md).
 
 ## Current API compatibility
 
