@@ -71,6 +71,13 @@ describe("repository use cases", () => {
 
     const confirmedOnly = demoRepositoryAssociations.filter((association) => association.kind === "confirmed");
     expect(pullRequestRelationship(confirmedOnly, demoRepository.locator, repositoryWide)).toBe("repository_wide");
+    expect(pullRequestRelationship([{
+      kind: "candidate",
+      agentId: "demo:agent-0002",
+      repository: demoRepository.locator,
+      provenance: { source: "sanitized-fixture", confidence: "medium" },
+      reason: "repository_match",
+    }], demoRepository.locator, repositoryWide)).toBe("candidate");
   });
 
   it("orders confirmed, candidate, and repository-wide PRs explicitly", () => {

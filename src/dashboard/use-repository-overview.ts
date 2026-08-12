@@ -59,20 +59,38 @@ async function mapLimited<T, R>(
   return results;
 }
 
+type RequestLimiter = <T>(operation: () => Promise<T>) => Promise<T>;
+
+export function createRequestLimiter(limit: number): RequestLimiter {
+  let active = 0;
+  const pending: Array<() => void> = [];
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => pending.push(resolve));
+    active += 1;
+    try {
+      return await operation();
+    } finally {
+      active -= 1;
+      pending.shift()?.();
+    }
+  };
+}
+
 async function openIssues(
   sourceControl: SourceControlClient,
   locator: RepositoryAssociation["repository"],
   signal: AbortSignal,
+  request: RequestLimiter,
 ): Promise<readonly SourceControlIssue[]> {
   const issues: SourceControlIssue[] = [];
   const visitedCursors = new Set<string>();
   let cursor: string | undefined;
   for (let page = 0; page < maximumIssuePages && issues.length < maximumIssues; page += 1) {
-    const result = await sourceControl.issues(
-      locator,
-      { states: ["open"], limit: maximumIssues, ...(cursor === undefined ? {} : { cursor }) },
-      { signal },
-    );
+    const result = await request(async () => await sourceControl.issues(
+        locator,
+        { states: ["open"], limit: maximumIssues, ...(cursor === undefined ? {} : { cursor }) },
+        { signal },
+      ));
     issues.push(...result.items.slice(0, maximumIssues - issues.length));
     if (!result.nextCursor || visitedCursors.has(result.nextCursor)) break;
     visitedCursors.add(result.nextCursor);
@@ -118,16 +136,17 @@ export function useRepositoryOverview(
         const prioritizedLocators = [...locators].sort((left, right) =>
           Number(!confirmedRepositories.has(repositoryKey(left))) - Number(!confirmedRepositories.has(repositoryKey(right))));
         const selected = prioritizedLocators.slice(0, maximumRepositories);
+        const request = createRequestLimiter(maximumConcurrency);
         const results = await mapLimited(selected, maximumConcurrency, async (locator) => {
           try {
             const associations = context.associations.filter((association) => repositoryKey(association.repository) === repositoryKey(locator));
             const explicitPullRequestNumbers = [...new Set(associations.flatMap((association) => association.kind === "confirmed" && association.pullRequest ? [association.pullRequest.number] : []))]
               .slice(0, maximumPullRequests);
             const [repository, issues, pullRequests, explicitPullRequests] = await Promise.all([
-              sourceControl.repository(locator, { signal: controller.signal }),
-              openIssues(sourceControl, locator, controller.signal),
-              sourceControl.pullRequests(locator, { states: ["open"], limit: maximumPullRequests }, { signal: controller.signal }),
-              mapLimited(explicitPullRequestNumbers, maximumConcurrency, async (number) => await sourceControl.pullRequest(locator, number, { signal: controller.signal })),
+              request(async () => await sourceControl.repository(locator, { signal: controller.signal })),
+              openIssues(sourceControl, locator, controller.signal, request),
+              request(async () => await sourceControl.pullRequests(locator, { states: ["open"], limit: maximumPullRequests }, { signal: controller.signal })),
+              mapLimited(explicitPullRequestNumbers, maximumConcurrency, async (number) => await request(async () => await sourceControl.pullRequest(locator, number, { signal: controller.signal }))),
             ]);
             const combinedPullRequests = new Map(pullRequests.items.map((pullRequest) => [pullRequest.number, pullRequest]));
             for (const pullRequest of explicitPullRequests) combinedPullRequests.set(pullRequest.number, pullRequest);

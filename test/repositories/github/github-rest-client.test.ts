@@ -26,6 +26,10 @@ function issue(number: number, pullRequest = false) {
   };
 }
 
+function issueWithLabels(labels: unknown[]) {
+  return { ...issue(17), labels };
+}
+
 function pullRequest(number: number, state: "open" | "closed", merged = false) {
   return {
     id: 2_000 + number,
@@ -144,6 +148,17 @@ describe("GitHubRestClient", () => {
     });
   });
 
+  it("ignores malformed Issue labels without rejecting the page", async () => {
+    const client = new GitHubRestClient({
+      fetch: vi.fn<typeof fetch>(async () => json([issueWithLabels([null, 7, ["nested"], { name: "safe" }, "plain"])])),
+      cacheTtlMs: 0,
+    });
+
+    await expect(client.issues(demoRepository.locator)).resolves.toMatchObject({
+      items: [{ number: 17, labels: ["safe", "plain"] }],
+    });
+  });
+
   it("decodes open, closed, and merged pull-request states without N+1 enrichment", async () => {
     const client = new GitHubRestClient({
       fetch: vi.fn<typeof fetch>(async () => json([
@@ -234,13 +249,16 @@ describe("GitHubRestClient", () => {
     const digest = vi.spyOn(globalThis.crypto.subtle, "digest").mockImplementationOnce(async () => await pendingDigest);
     const controller = new AbortController();
 
-    const pending = client.repository(demoRepository.locator, { signal: controller.signal });
-    controller.abort(new DOMException("cancelled", "AbortError"));
-    finishDigest(new Uint8Array(32).buffer);
+    try {
+      const pending = client.repository(demoRepository.locator, { signal: controller.signal });
+      controller.abort(new DOMException("cancelled", "AbortError"));
+      finishDigest(new Uint8Array(32).buffer);
 
-    await expect(pending).rejects.toMatchObject({ code: "aborted" });
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    digest.mockRestore();
+      await expect(pending).rejects.toMatchObject({ code: "aborted" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      digest.mockRestore();
+    }
   });
 
   it("maps authentication and rate-limit failures without exposing response bodies", async () => {

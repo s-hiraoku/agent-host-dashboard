@@ -212,7 +212,12 @@ function decodeIssue(value: unknown): SourceControlIssue | undefined {
   const state = stringField(input, "state");
   if (state !== "open" && state !== "closed") throw new SourceControlError("invalid_response", "GitHub returned an invalid Issue state.");
   const labels = Array.isArray(input.labels)
-    ? input.labels.flatMap((label) => typeof label === "string" ? [label] : typeof record(label).name === "string" ? [record(label).name as string] : [])
+    ? input.labels.flatMap((label) => {
+        if (typeof label === "string") return [label];
+        if (!label || typeof label !== "object" || Array.isArray(label)) return [];
+        const name = (label as Record<string, unknown>).name;
+        return typeof name === "string" ? [name] : [];
+      })
     : [];
   return {
     id: String(numberField(input, "id")),

@@ -37,4 +37,4 @@ The existing persisted preference allowlist remains limited to presentation and 
 
 Requests are cursor-paginated and capped at 100 items. Callers must deduplicate repository locators before querying. The GitHub transport follow-up must add bounded concurrency, cancellation, conditional requests/TTL caching, and rate-limit metadata rather than issuing one request per visible agent.
 
-These tests are dashboard domain and fixture-consumer tests. They are not agent-host API conformance; production conformance will be added only after the backend publishes the versioned association contract.
+The repository tests under `test/repositories` are dashboard domain and fixture-consumer tests. They are not agent-host API conformance; production conformance will be added only after the backend publishes the versioned association contract.
