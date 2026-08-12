@@ -26,7 +26,7 @@ export interface AgentSummary {
 
 export interface ApprovalRequest {
   readonly id: string;
-  readonly kind: "command" | "file";
+  readonly kind: "command" | "file" | "other";
   readonly summary: string;
   readonly reason?: string;
   readonly command?: string;
@@ -77,6 +77,7 @@ export interface AgentPageRequest {
 export interface AgentSnapshot {
   readonly agents: readonly AgentSummary[];
   readonly revision: number;
+  readonly eventSequence?: number;
   readonly nextCursor?: string;
   readonly total?: number;
   readonly facets?: {
@@ -111,11 +112,11 @@ export interface AgentActionResult {
 }
 
 export type AgentEvent =
-  | { readonly type: "agent.upserted"; readonly revision: number; readonly agent: AgentSummary }
-  | { readonly type: "agent.removed"; readonly revision: number; readonly agentId: string }
-  | { readonly type: "adapter.health"; readonly revision: number; readonly adapter: AdapterHealth }
-  | { readonly type: "action.completed"; readonly revision: number; readonly agentId: string; readonly actionId: string; readonly ok: boolean }
-  | { readonly type: "heartbeat"; readonly revision: number };
+  | { readonly type: "agent.upserted"; readonly revision: number; readonly sequence?: number; readonly agent: AgentSummary }
+  | { readonly type: "agent.removed"; readonly revision: number; readonly sequence?: number; readonly agentId: string }
+  | { readonly type: "adapter.health"; readonly revision: number; readonly sequence?: number; readonly adapter: AdapterHealth }
+  | { readonly type: "action.completed"; readonly revision: number; readonly sequence?: number; readonly agentId: string; readonly actionId: string; readonly ok: boolean }
+  | { readonly type: "heartbeat"; readonly revision: number; readonly sequence?: number };
 
 export function canPerform(capabilities: AgentCapabilities, action: AgentActionKind): boolean {
   return capabilities[action] === true;

@@ -25,6 +25,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --exclude 'test/contract/**'",
     "test:contract": "vitest run test/contract",
+    "test:conformance:live": "npm run build:types && node scripts/verify-agent-host-v1.mjs",
     "test:e2e": "playwright test",
     "test:e2e:functional": "playwright test --project=desktop --project=narrow",
     "test:a11y": "playwright test --project=accessibility",

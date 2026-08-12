@@ -1,0 +1,10 @@
+{
+  "repository": "s-hiraoku/agent-host",
+  "commit": "9344c8287331a34a88f640cd17e9d82c280bbf45",
+  "fixtureVersion": 1,
+  "largeList": {
+    "gitBlobSha": "75a40a60e80f331673a5d6086b8b924dd3564e05",
+    "bytes": 544491,
+    "agentCount": 1000
+  }
+}

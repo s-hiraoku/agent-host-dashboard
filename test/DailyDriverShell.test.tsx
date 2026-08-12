@@ -64,7 +64,7 @@ describe("daily-driver shell", () => {
     expect(serialized).not.toContain(generatedCredential);
   });
 
-  it("restores non-secret preferences while requiring a new credential after reload", async () => {
+  it("restores non-secret preferences with an empty credential after reload", async () => {
     const storage = new RecordingStorage();
     const store = new LocalPreferenceStore(storage);
     store.save({ ...store.load(), endpoint: "http://127.0.0.1:9000/", density: "compact" });
@@ -73,8 +73,28 @@ describe("daily-driver shell", () => {
 
     expect(screen.getByLabelText("Agent-host endpoint")).toHaveValue("http://127.0.0.1:9000/");
     expect(screen.getByLabelText(/Access token/)).toHaveValue("");
-    expect(screen.getByText(/Reloading requires authentication again/)).toBeInTheDocument();
+    expect(screen.getByText(/Reloading a direct connection requires authentication again/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Connect securely" })).toBeEnabled());
+  });
+
+  it("allows a same-origin proxy connection without a form credential", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    let observedCredential: string | undefined = "not-called";
+    const connector: ClientConnector = {
+      async open(input) {
+        observedCredential = input.credential();
+        return { client: new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] }), close() {} };
+      },
+    };
+    const user = userEvent.setup();
+    render(<DailyDriverShell connector={connector} preferenceStore={new MemoryPreferenceStore()} />);
+
+    await user.click(screen.getByRole("button", { name: "Connect securely" }));
+
+    expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();
+    expect(observedCredential).toBeUndefined();
   });
 
   it("preserves filter, selection, and draft while rotating the client lease", async () => {
@@ -292,7 +312,7 @@ describe("daily-driver shell", () => {
 
     expect(await screen.findByRole("heading", { name: "Connection could not be opened" })).toBeInTheDocument();
     expect(connector.open).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Agent-host endpoint")).toHaveValue("http://127.0.0.1:8787/");
+    expect(screen.getByLabelText("Agent-host endpoint")).toHaveValue("http://127.0.0.1:4777/");
     expect(storage.values.get(preferenceStorageKey) ?? "").not.toContain(secret);
     expect(view.container.innerHTML).not.toContain(secret);
   });

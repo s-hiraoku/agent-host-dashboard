@@ -85,6 +85,41 @@ describe("FetchHttpChannel", () => {
     });
   });
 
+  it("preserves the stable API error code and safe details without exposing an error body", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        apiVersion: "1",
+        error: { code: "stale_cursor", message: "restart pagination", details: { cursor: "stale" } },
+      }), { status: 409, headers: { "content-type": "application/json" } }),
+    );
+    const channel = new FetchHttpChannel({ fetch });
+
+    const failure = await channel.request({ path: "/v1/agents?cursor=opaque" }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      code: "revision_gap",
+      status: 409,
+      retryable: true,
+      message: "restart pagination",
+      details: { apiCode: "stale_cursor", cursor: "stale" },
+    });
+    expect(Object.keys((failure as AgentHostError).details ?? {})).toEqual(["apiCode", "cursor"]);
+  });
+
+  it("preserves Retry-After as safe rate-limit metadata", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ apiVersion: "1", error: { code: "rate_limited", message: "slow down" } }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "3" },
+      }),
+    );
+
+    await expect(new FetchHttpChannel({ fetch }).request({ path: "/v1/agents" })).rejects.toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      details: { apiCode: "rate_limited", retryAfter: "3" },
+    });
+  });
+
   it("requires an event-stream content type while allowing parameters", async () => {
     const validFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
       new Response("data: ok\n\n", { headers: { "content-type": "text/event-stream; charset=utf-8" } }),

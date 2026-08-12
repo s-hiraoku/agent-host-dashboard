@@ -49,7 +49,7 @@ const defaultSort: AgentSort = { field: "status", direction: "asc" };
 
 export const defaultPreferences: DashboardPreferences = {
   version: 3,
-  endpoint: "http://127.0.0.1:8787/",
+  endpoint: "http://127.0.0.1:4777/",
   density: "comfortable",
   columns: [...agentColumns],
   query: { status: "all", provider: "", sort: defaultSort },

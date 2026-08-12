@@ -15,7 +15,7 @@ test("onboards without persisting credentials and restores safe preferences", as
   await expect(page.getByText(/Simulation mode/)).toBeVisible();
 
   const persistedAfterConnect = await page.evaluate(() => localStorage.getItem("agent-host-dashboard.preferences") ?? "");
-  expect(persistedAfterConnect).toContain("http://127.0.0.1:8787/");
+  expect(persistedAfterConnect).toContain("http://127.0.0.1:4777/");
   expect(persistedAfterConnect).not.toContain(generatedCredential);
   expect(page.url()).not.toContain(generatedCredential);
 
@@ -30,7 +30,7 @@ test("onboards without persisting credentials and restores safe preferences", as
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Connect to your local agent-host" })).toBeVisible();
-  await expect(page.getByLabel("Agent-host endpoint")).toHaveValue("http://127.0.0.1:8787/");
+  await expect(page.getByLabel("Agent-host endpoint")).toHaveValue("http://127.0.0.1:4777/");
   await expect(page.getByLabel(/Access token/)).toHaveValue("");
   await connect(page);
   await expect(page.locator(".app-shell")).toHaveClass(/density-compact/);
@@ -103,7 +103,7 @@ test("provides session activity, diagnostics, scoped notifications, and search s
   await expect(page.locator(".workspace")).toBeFocused();
 
   await page.getByRole("button", { name: "Diagnostics" }).click();
-  await expect(page.getByText("events-after-revision")).toBeVisible();
+  await expect(page.getByText(/events-after-revision/)).toBeVisible();
   await expect(page.getByText("Sanitized diagnostics only")).toBeVisible();
 
   await page.getByRole("button", { name: "Settings" }).click();

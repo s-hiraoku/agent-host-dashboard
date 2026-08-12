@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendBoundedEvent,
   applyVisibleEvent,
   findAttentionAgent,
   providerMetrics,
   reconcileVisibleEvents,
+  replayableEvents,
   statusMetrics,
   formatActivity,
+  type BoundedEventBuffer,
 } from "../src/dashboard/use-cases.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 
@@ -36,6 +39,28 @@ describe("dashboard use cases", () => {
     expect(updated.agents.map((agent) => agent.id)).toEqual(snapshot.agents.map((agent) => agent.id));
     expect(updated.agents[4]?.status).toBe("blocked");
     expect(updated.revision).toBe(41);
+  });
+
+  it("applies distinct sequenced events that share one snapshot revision", () => {
+    const snapshot = createLargeDemoSnapshot(10, 40);
+    const first = snapshot.agents[0]!;
+    const second = snapshot.agents[1]!;
+    const afterFirst = applyVisibleEvent(snapshot, {
+      type: "agent.upserted",
+      revision: 41,
+      sequence: 8,
+      agent: { ...first, name: "First update" },
+    });
+    const afterSecond = applyVisibleEvent(afterFirst, {
+      type: "agent.upserted",
+      revision: 41,
+      sequence: 9,
+      agent: { ...second, name: "Second update" },
+    });
+
+    expect(afterSecond.agents[0]?.name).toBe("First update");
+    expect(afterSecond.agents[1]?.name).toBe("Second update");
+    expect(afterSecond.eventSequence).toBe(9);
   });
 
   it("removes a visible row that no longer belongs to the active filter", () => {
@@ -69,6 +94,28 @@ describe("dashboard use cases", () => {
     expect(reconciled.facets?.byProvider["demo-alpha"]).toBe(9);
   });
 
+  it("does not replay sequenced events already represented by an authoritative snapshot", () => {
+    const snapshot = createLargeDemoSnapshot(10, 41);
+    const first = snapshot.agents[0]!;
+    const second = snapshot.agents[1]!;
+    const reconciled = reconcileVisibleEvents(snapshot, [
+      { type: "agent.upserted", revision: 41, sequence: 12, agent: { ...second, name: "Second update" } },
+      { type: "agent.upserted", revision: 41, sequence: 11, agent: { ...first, name: "First update" } },
+    ]);
+
+    expect(reconciled).toEqual(snapshot);
+  });
+
+  it("rejects snapshot replay when the bounded event buffer overflowed after the request began", () => {
+    let buffer: BoundedEventBuffer = { entries: [], droppedThroughOrdinal: 0 };
+    for (let ordinal = 1; ordinal <= 501; ordinal += 1) {
+      buffer = appendBoundedEvent(buffer, ordinal, { type: "heartbeat", revision: 40 + ordinal });
+    }
+
+    expect(() => replayableEvents(buffer, 0)).toThrow(/outpaced the bounded snapshot replay buffer/);
+    expect(replayableEvents(buffer, 1)).toHaveLength(500);
+  });
+
   it("invalidates aggregate facets when an off-page event cannot be reconciled safely", () => {
     const snapshot = {
       ...createLargeDemoSnapshot(100),
@@ -84,6 +131,16 @@ describe("dashboard use cases", () => {
     expect(updated.facets).toBeUndefined();
     expect(updated.agents).toEqual(snapshot.agents);
     expect(updated.revision).toBe(41);
+  });
+
+  it("rejects snapshot replay when the bounded event buffer overflowed after the request began", () => {
+    let buffer: BoundedEventBuffer = { entries: [], droppedThroughOrdinal: 0 };
+    for (let ordinal = 1; ordinal <= 501; ordinal += 1) {
+      buffer = appendBoundedEvent(buffer, ordinal, { type: "heartbeat", revision: 40 + ordinal });
+    }
+
+    expect(() => replayableEvents(buffer, 0)).toThrow(/outpaced the bounded snapshot replay buffer/);
+    expect(replayableEvents(buffer, 1)).toHaveLength(500);
   });
 
   it("decrements total while invalidating facets for an off-page removal", () => {

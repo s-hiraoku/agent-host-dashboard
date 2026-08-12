@@ -85,6 +85,42 @@ describe("agent-host connection", () => {
 
     expect(delays).toEqual([250]);
     expect(recorded.states.some((value) => value.status === "reconnecting" && value.attempt === 1)).toBe(true);
+    expect(recorded.snapshots.map((snapshot) => snapshot.revision)).toEqual([40, 40]);
+  });
+
+  it("accepts multiple sequenced events for one snapshot revision", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.eventStreams = [[
+      { type: "agent.upserted", revision: 41, sequence: 10, agent: { ...demoAgents[0]!, name: "First" } },
+      { type: "agent.upserted", revision: 41, sequence: 11, agent: { ...demoAgents[1]!, name: "Second" } },
+    ]];
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    let close: () => void = () => undefined;
+    const recorded = recorder(() => {
+      if (recorded.events.length === 2) close();
+    });
+    const connection = client.connect(recorded.observer, { scheduler: immediateScheduler });
+    close = connection.close;
+    await connection.completed;
+
+    expect(recorded.events.map((event) => event.sequence)).toEqual([10, 11]);
+    expect(recorded.errors).toEqual([]);
+  });
+
+  it("detects a replayed sequence even when the snapshot revision is unchanged", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.eventStreams = [[
+      { type: "heartbeat", revision: 40, sequence: 10 },
+      { type: "heartbeat", revision: 40, sequence: 10 },
+    ]];
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const recorded = recorder();
+
+    await client.connect(recorded.observer, { scheduler: immediateScheduler, maxConsecutiveResyncs: 0 }).completed;
+
+    expect(recorded.events.map((event) => event.sequence)).toEqual([10]);
+    expect(recorded.errors).toContainEqual(expect.objectContaining({ code: "revision_gap" }));
+    expect(recorded.states.at(-1)?.status).toBe("disconnected");
   });
 
   it("retries initial discovery failures until the host becomes available", async () => {
