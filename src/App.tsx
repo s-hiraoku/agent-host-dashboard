@@ -13,6 +13,10 @@ import {
   Code2,
   Command,
   HeartPulse,
+  ExternalLink,
+  GitBranch,
+  GitFork,
+  GitPullRequest,
   LayoutDashboard,
   LockKeyhole,
   Pause,
@@ -33,9 +37,13 @@ import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
 import { agentActions, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
 import { useDashboard, type DashboardActionRecord, type DashboardQuery } from "./dashboard/use-dashboard.js";
+import { useRepositoryOverview } from "./dashboard/use-repository-overview.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
 import { notificationFromEvent, shouldNotify, type DashboardNotificationPermission, type NotificationCoordinator, type NotificationGateway } from "./daily/notifications.js";
 import { agentColumns, densities, type DashboardPreferences } from "./daily/preferences.js";
+import type { RepositoryContextSource } from "./repositories/context-source.js";
+import type { PullRequestRelationship } from "./repositories/domain.js";
+import type { SourceControlClient } from "./repositories/source-control.js";
 
 type DemoScenario = "live" | "disconnected" | "stale" | "unauthorized" | "incompatible" | "blocked" | "error";
 
@@ -170,6 +178,53 @@ function ApprovalContext({ approval }: { readonly approval: ApprovalRequest }) {
       {approval.command && <div><span className="field-label">Command</span><code>{approval.command}</code></div>}
       {approval.path && <div><span className="field-label">File</span><code>{approval.path}</code></div>}
     </div>
+  );
+}
+
+const relationshipLabel: Record<PullRequestRelationship, string> = {
+  associated: "Agent PR",
+  candidate: "Candidate",
+  repository_wide: "Repo PR",
+};
+
+function RepositoryPanel({
+  agentId,
+  contextSource,
+  sourceControl,
+}: {
+  readonly agentId: string;
+  readonly contextSource: RepositoryContextSource | undefined;
+  readonly sourceControl: SourceControlClient | undefined;
+}) {
+  const overview = useRepositoryOverview(agentId, contextSource, sourceControl);
+  const state = overview.state;
+  return (
+    <section className="repository-panel" aria-labelledby="repository-heading" aria-busy={state.status === "loading"}>
+      <div className="section-heading">
+        <div><p className="eyebrow">Code context</p><h3 id="repository-heading">Repositories · Issues · PRs</h3></div>
+        <GitFork aria-hidden="true" />
+      </div>
+      {!contextSource && <div className="repository-state"><strong>Repository context not exposed</strong><p>This host has not published a versioned agent-to-repository association.</p></div>}
+      {contextSource && state.status === "loading" && <div className="repository-state" role="status"><strong>Loading repository context…</strong><p>Only the selected agent is queried.</p></div>}
+      {contextSource && (state.status === "unsupported" || state.status === "unavailable") && <div className="repository-state"><strong>{state.status === "unsupported" ? "Repository context unsupported" : "Repository context unavailable"}</strong><p>{state.message}</p>{state.retryable && <button type="button" className="text-button" onClick={overview.refresh}>Retry</button>}</div>}
+      {contextSource && state.status === "error" && <div className={`repository-state repository-${state.code}`} role={state.code === "unauthorized" ? "alert" : "status"}><strong>{state.code === "unauthorized" ? "GitHub authentication required" : state.code === "rate_limited" ? "GitHub rate limit reached" : "Repository query failed"}</strong><p>{state.message}{state.retryAt ? ` Retry after ${new Date(state.retryAt).toLocaleTimeString()}.` : ""}</p><button type="button" className="text-button" onClick={overview.refresh}>Retry</button></div>}
+      {contextSource && state.status === "ready" && !state.entries.length && <div className="repository-state"><strong>No repository association</strong><p>The host did not report a repository for this agent.</p></div>}
+      {contextSource && state.status === "ready" && state.failures.map((failure) => <div className="repository-state" role="status" key={failure.repository}><strong>Repository context unavailable for {failure.repository}</strong><p>{failure.message}{failure.retryAt ? ` Retry after ${new Date(failure.retryAt).toLocaleTimeString()}.` : ""}</p></div>)}
+      {contextSource && state.status === "ready" && state.entries.map((entry, entryIndex) => (
+        <article className="repository-card" key={`${entry.repository.locator.host}/${entry.repository.locator.owner}/${entry.repository.locator.name}`}>
+          <header className="repository-card-heading">
+            <div><a href={entry.repository.url} target="_blank" rel="noreferrer"><strong>{entry.repository.locator.owner}/{entry.repository.locator.name}</strong><ExternalLink aria-hidden="true" /></a><span>{entry.repository.locator.host} · {entry.repository.visibility}</span></div>
+            <div className="association-row">{entry.associations.map((association, index) => <span className={`association association-${association.kind}`} key={`${association.kind}-${index}`}>{association.kind === "confirmed" ? "Confirmed" : "Candidate"}</span>)}</div>
+          </header>
+          {entry.associations.some((association) => association.checkout?.branch) && <div className="repository-branch"><GitBranch aria-hidden="true" /><span className="mono">{entry.associations.find((association) => association.checkout?.branch)?.checkout?.branch}</span></div>}
+          <div className="repository-columns">
+            <section aria-labelledby={`issues-${entryIndex}`}><div className="repository-list-heading"><h4 id={`issues-${entryIndex}`}>Open issues</h4><span>{entry.issues.length}</span></div><ul>{entry.issues.map((issue) => <li key={issue.id}><a href={issue.url} target="_blank" rel="noreferrer"><span className="mono">#{issue.number}</span><span>{issue.title}</span><ExternalLink aria-hidden="true" /></a></li>)}</ul>{!entry.issues.length && <p className="repository-empty">No open issues in this page.</p>}</section>
+            <section aria-labelledby={`prs-${entryIndex}`}><div className="repository-list-heading"><h4 id={`prs-${entryIndex}`}>Pull requests</h4><span>{entry.pullRequests.length}</span></div><ul>{entry.pullRequests.map(({ pullRequest, relationship }) => <li key={pullRequest.id}><a href={pullRequest.url} target="_blank" rel="noreferrer"><GitPullRequest aria-hidden="true" /><span className="mono">#{pullRequest.number}</span><span>{pullRequest.title}</span></a><span className={`pr-relationship relationship-${relationship}`}>{relationshipLabel[relationship]}</span><small>{pullRequest.draft ? "Draft" : pullRequest.state} · checks {pullRequest.checks} · review {pullRequest.review}</small></li>)}</ul>{!entry.pullRequests.length && <p className="repository-empty">No open or explicitly associated pull requests.</p>}</section>
+          </div>
+        </article>
+      ))}
+      {contextSource && state.status === "ready" && state.truncated && <p className="repository-limit" role="status">Showing the first 8 associated repositories.</p>}
+    </section>
   );
 }
 
@@ -353,7 +408,7 @@ function PrivacySurface({ onWorkspace, onClear }: { readonly onWorkspace: () => 
       <header className="settings-heading"><div><p className="eyebrow">Local data boundary</p><h1>Privacy</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
       <section className="settings-card privacy-card">
         <LockKeyhole aria-hidden="true" />
-        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, saved view names, and global notification-type toggles may be stored locally. Credentials, provider/project scopes, recent agents, action history, prompt drafts, commands, cwd values, raw JSON, and agent snapshots are never persisted.</p></div>
+        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, saved view names, and global notification-type toggles may be stored locally. Credentials, provider/project scopes, recent agents, action history, prompt drafts, commands, cwd values, repository names and URLs, Issue/PR content, branches, worktrees, raw JSON, and agent snapshots are never persisted.</p></div>
       </section>
       <section className="settings-card">
         <div><p className="eyebrow">Reset</p><h2>Clear local dashboard data</h2><p>This removes saved views and appearance choices from storage. The current workspace stays in memory until reload; the active credential is cleared when you change connection.</p></div>
@@ -402,7 +457,7 @@ function DiagnosticsSurface({ model, onWorkspace }: { readonly model: ReturnType
   );
 }
 
-export function App({ client, now = Date.now, dailyDriver, showDemoControls = true }: { readonly client: AgentHostClient; readonly now?: () => number; readonly dailyDriver?: DailyDriverControls; readonly showDemoControls?: boolean }) {
+export function App({ client, now = Date.now, dailyDriver, showDemoControls = true, repositoryContext, sourceControl }: { readonly client: AgentHostClient; readonly now?: () => number; readonly dailyDriver?: DailyDriverControls; readonly showDemoControls?: boolean; readonly repositoryContext?: RepositoryContextSource; readonly sourceControl?: SourceControlClient }) {
   const onQueryChange = useCallback((query: DashboardQuery) => {
     if (!dailyDriver) return;
     dailyDriver.onPreferencesChange((current) => ({
@@ -649,6 +704,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
                 <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
               </dl>
               <div className="capability-row"><span className="field-label">Public capabilities</span><div>{agentActions.filter((action) => model.detail?.capabilities[action]).map((action) => <span className="capability" key={action}>{action}</span>)}</div></div>
+              {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} />}
               <section className="timeline" aria-labelledby="timeline-heading">
                 <div className="section-heading"><div><p className="eyebrow">Semantic stream</p><h3 id="timeline-heading">Live events</h3></div><span className="live-indicator"><Activity aria-hidden="true" />Live</span></div>
                 <ol>

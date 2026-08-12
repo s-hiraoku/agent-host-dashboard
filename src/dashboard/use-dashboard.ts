@@ -312,7 +312,9 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   }, [client, detailGeneration, selectedId]);
 
   const select = useCallback((agentId: string) => {
+    if (agentId === selectedIdRef.current) return;
     selectedIdRef.current = agentId;
+    setDetail(undefined);
     setDetailError(undefined);
     setSelectedId(agentId);
   }, []);

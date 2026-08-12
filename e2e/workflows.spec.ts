@@ -13,6 +13,8 @@ test("loads, filters, paginates, and exposes detail JSON without unbounded DOM",
 
   await expect(page.getByText("Live connection")).toBeVisible();
   await expect(page.getByText("50 shown of 1000")).toBeVisible();
+  await expect(page.getByRole("link", { name: /example-labs\/orbit/ })).toBeVisible();
+  await expect(page.getByText("Agent PR")).toBeVisible();
   await expect(page.locator(".agent-list > li")).toHaveCount(50);
 
   await page.getByRole("button", { name: /Next/ }).click();

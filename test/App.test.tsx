@@ -13,6 +13,9 @@ import type { DashboardNotificationPermission, NotificationCoordinator, Notifica
 import { defaultPreferences, type DashboardPreferences } from "../src/daily/preferences.js";
 import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
+import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
+import { SourceControlError } from "../src/repositories/source-control.js";
+import { demoIssues, demoPullRequests, demoRepositoryAssociations } from "../src/testing/repositories/fixtures.js";
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -86,6 +89,178 @@ describe("evaluation dashboard", () => {
     expect(await screen.findByText("50 shown of 1000")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem").length).toBeLessThan(70);
     expect(screen.getByRole("button", { name: /Next/ })).toBeEnabled();
+  });
+
+  it("shows sanitized repository, Issue, and PR context only for the selected agent", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const repositoryContext = new MockRepositoryContextSource();
+    const sourceControl = new MockSourceControlClient();
+    const repository = vi.spyOn(sourceControl, "repository");
+    render(<App client={client} repositoryContext={repositoryContext} sourceControl={sourceControl} />);
+
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toHaveAttribute("href", "https://github.com/example-labs/orbit");
+    expect(screen.getByText("Clarify bounded parser behavior")).toBeInTheDocument();
+    expect(screen.getByText("Harden parser boundary")).toBeInTheDocument();
+    expect(screen.getByText("Agent PR")).toBeInTheDocument();
+    expect(repository).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads an explicitly associated PR even when it is outside the bounded list page", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const sourceControl = new MockSourceControlClient();
+    sourceControl.pullRequests = async () => ({ items: [demoPullRequests[1]!] });
+    const pullRequest = vi.spyOn(sourceControl, "pullRequest");
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={sourceControl} />);
+
+    expect(await screen.findByText("Harden parser boundary")).toBeInTheDocument();
+    expect(screen.getByText("Agent PR")).toBeInTheDocument();
+    expect(pullRequest).toHaveBeenCalledWith(expect.objectContaining({ name: "orbit" }), 42, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("continues bounded Issue pagination when a page contains no Issue entries", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const sourceControl = new MockSourceControlClient();
+    const issues = vi.spyOn(sourceControl, "issues")
+      .mockResolvedValueOnce({ items: [], nextCursor: "2" })
+      .mockResolvedValueOnce({ items: [demoIssues[0]!] });
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={sourceControl} />);
+
+    expect(await screen.findByText("Clarify bounded parser behavior")).toBeInTheDocument();
+    expect(issues).toHaveBeenNthCalledWith(2, expect.anything(), expect.objectContaining({ cursor: "2" }), expect.anything());
+  });
+
+  it("keeps valid repository context visible when another association fails", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const repositoryContext = new MockRepositoryContextSource();
+    repositoryContext.result = {
+      state: "ready",
+      revision: 41,
+      associations: [
+        ...demoRepositoryAssociations,
+        {
+          kind: "confirmed",
+          agentId: "demo:agent-0002",
+          repository: { service: "github", host: "github.com", owner: "example-labs", name: "retired" },
+          provenance: { source: "sanitized-fixture", confidence: "high" },
+        },
+      ],
+    };
+    render(<App client={client} repositoryContext={repositoryContext} sourceControl={new MockSourceControlClient()} />);
+
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toBeInTheDocument();
+    expect(screen.getByText(/Repository context unavailable for github.com\/example-labs\/retired/)).toBeInTheDocument();
+  });
+
+  it("keeps confirmed repositories inside the bounded overview before candidates", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const repositoryContext = new MockRepositoryContextSource();
+    const sourceControl = new MockSourceControlClient();
+    const candidates = Array.from({ length: 8 }, (_, index) => ({
+      service: "github" as const,
+      host: "github.com",
+      owner: "example-labs",
+      name: `candidate-${index}`,
+    }));
+    for (const locator of candidates) {
+      const key = `github:github.com:example-labs:${locator.name}`;
+      sourceControl.repositories.set(key, { locator, url: `https://github.com/example-labs/${locator.name}`, visibility: "public" });
+      sourceControl.issuesByRepository.set(key, []);
+      sourceControl.pullRequestsByRepository.set(key, []);
+    }
+    repositoryContext.result = {
+      state: "ready",
+      revision: 42,
+      associations: [
+        ...candidates.map((repository) => ({
+          kind: "candidate" as const,
+          agentId: "demo:agent-0002",
+          repository,
+          provenance: { source: "sanitized-fixture", confidence: "medium" as const },
+          reason: "repository_match" as const,
+        })),
+        { ...demoRepositoryAssociations[0]!, agentId: "demo:agent-0002" },
+      ],
+    };
+    render(<App client={client} repositoryContext={repositoryContext} sourceControl={sourceControl} />);
+
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /example-labs\/candidate-7/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Showing the first 8 associated repositories.")).toBeInTheDocument();
+  });
+
+  it("provides an explicit GitHub authentication recovery state", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const sourceControl = new MockSourceControlClient();
+    sourceControl.repository = async () => {
+      throw new SourceControlError("unauthorized", "GitHub authentication failed.", { status: 401 });
+    };
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={sourceControl} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("GitHub authentication required");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("does not install stale repository context after selection changes", async () => {
+    let resolveInitial: (value: Awaited<ReturnType<MockRepositoryContextSource["forAgent"]>>) => void = () => undefined;
+    const initial = new Promise<Awaited<ReturnType<MockRepositoryContextSource["forAgent"]>>>((resolve) => { resolveInitial = resolve; });
+    const context = new MockRepositoryContextSource();
+    const forAgent = context.forAgent.bind(context);
+    context.forAgent = async (agentId, options) => agentId === "demo:agent-0002" ? await initial : await forAgent(agentId, options);
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const user = userEvent.setup();
+    render(<App client={client} repositoryContext={context} sourceControl={new MockSourceControlClient()} />);
+    const next = (await screen.findAllByRole("button", { name: /Sanitized agent/ })).find((button) => button.getAttribute("aria-current") !== "true")!;
+
+    await user.click(next);
+    resolveInitial({ state: "ready", associations: context.result.state === "ready" ? context.result.associations : [] });
+
+    expect(await screen.findByText("No repository association")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
+  });
+
+  it("clears the previous agent detail and repository while the next detail is pending", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createLargeDemoSnapshot();
+    transport.holdEventStreams = true;
+    const originalDetail = transport.detail.bind(transport);
+    let pendingAgentId: string | undefined;
+    transport.detail = async (agentId, options) => {
+      if (pendingAgentId === agentId) return await new Promise<AgentDetail>(() => undefined);
+      return await originalDetail(agentId, options);
+    };
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const user = userEvent.setup();
+    render(<App client={client} repositoryContext={new MockRepositoryContextSource()} sourceControl={new MockSourceControlClient()} />);
+    expect(await screen.findByRole("link", { name: /example-labs\/orbit/ })).toBeInTheDocument();
+    const next = (await screen.findAllByRole("button", { name: /Sanitized agent/ })).find((button) => button.getAttribute("aria-current") !== "true")!;
+    pendingAgentId = transport.currentSnapshot.agents.find((agent) => next.textContent?.includes(agent.name))?.id;
+    expect(pendingAgentId).toBeDefined();
+
+    await user.click(next);
+
+    expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Select an agent to inspect its public details.")).toBeInTheDocument();
   });
 
   it("does not present page-local sort or facet approximations as global capabilities", async () => {

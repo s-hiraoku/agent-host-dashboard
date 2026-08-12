@@ -2,6 +2,8 @@ import { KeyRound, LockKeyhole, RotateCcw, Server, ShieldAlert, WifiOff } from "
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { App } from "../App.js";
 import { normalizeAgentHostBaseUrl } from "../http/fetch-channel.js";
+import type { RepositoryContextSource } from "../repositories/context-source.js";
+import type { SourceControlClient } from "../repositories/source-control.js";
 import { BrowserNotificationCoordinator, BrowserNotificationGateway, type NotificationCoordinator, type NotificationGateway } from "./notifications.js";
 import { defaultPreferences, type DashboardPreferences, type PreferenceStore } from "./preferences.js";
 import {
@@ -24,7 +26,7 @@ async function notificationNamespaceFor(endpoint: string): Promise<string> {
   return [...new Uint8Array(digest).slice(0, 12)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator }) {
+export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator, repositoryContext, sourceControl }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator; readonly repositoryContext?: RepositoryContextSource; readonly sourceControl?: SourceControlClient }) {
   const [preferences, setPreferences] = useState(() => preferenceStore.load());
   const [lease, setLease] = useState<ClientLease>();
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -180,7 +182,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} dailyDriver={{
+      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} {...(repositoryContext ? { repositoryContext } : {})} {...(sourceControl ? { sourceControl } : {})} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,
