@@ -124,8 +124,10 @@ describe("GitHubRestClient", () => {
 
   it("lists Issues without misclassifying pull requests returned by the Issues endpoint", async () => {
     const fetcher = vi.fn<typeof fetch>(async (input) => {
-      expect(String(input)).toContain("state=open");
-      expect(String(input)).toContain("per_page=2");
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/repos/example-labs/orbit/issues");
+      expect(url.searchParams.get("state")).toBe("open");
+      expect(url.searchParams.get("per_page")).toBe("2");
       return json([issue(17), issue(42, true)], {
         headers: {
           ...headers,

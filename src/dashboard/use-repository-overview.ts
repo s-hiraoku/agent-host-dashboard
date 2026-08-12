@@ -36,6 +36,11 @@ export type RepositoryOverviewState =
   | { readonly status: "unsupported" | "unavailable"; readonly message: string; readonly retryable: boolean }
   | { readonly status: "error"; readonly code: string; readonly message: string; readonly retryAt?: string };
 
+export function requiresRepositoryAuthentication(state: RepositoryOverviewState): boolean {
+  return (state.status === "error" && state.code === "unauthorized")
+    || (state.status === "ready" && state.failures.some((failure) => failure.code === "unauthorized"));
+}
+
 async function mapLimited<T, R>(
   values: readonly T[],
   limit: number,

@@ -37,7 +37,7 @@ import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
 import { agentActions, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
 import { useDashboard, type DashboardActionRecord, type DashboardQuery } from "./dashboard/use-dashboard.js";
-import { useRepositoryOverview } from "./dashboard/use-repository-overview.js";
+import { requiresRepositoryAuthentication, useRepositoryOverview } from "./dashboard/use-repository-overview.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
 import { notificationFromEvent, shouldNotify, type DashboardNotificationPermission, type NotificationCoordinator, type NotificationGateway } from "./daily/notifications.js";
 import { agentColumns, densities, type DashboardPreferences } from "./daily/preferences.js";
@@ -201,7 +201,7 @@ function RepositoryPanel({
   const overview = useRepositoryOverview(agentId, contextSource, sourceControl);
   const state = overview.state;
   useEffect(() => {
-    if (state.status === "error" && state.code === "unauthorized") onAuthenticationFailure?.();
+    if (requiresRepositoryAuthentication(state)) onAuthenticationFailure?.();
   }, [onAuthenticationFailure, state]);
   return (
     <section className="repository-panel" aria-labelledby="repository-heading" aria-busy={state.status === "loading"}>
