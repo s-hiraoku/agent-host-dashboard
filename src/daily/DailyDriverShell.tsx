@@ -1,5 +1,5 @@
 import { KeyRound, LockKeyhole, RotateCcw, Server, ShieldAlert, WifiOff } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { App } from "../App.js";
 import { normalizeAgentHostBaseUrl } from "../http/fetch-channel.js";
 import type { RepositoryContextSource } from "../repositories/context-source.js";
@@ -12,6 +12,7 @@ import {
   type ClientConnector,
   type ClientLease,
   type SessionFailure,
+  type SourceControlClientFactory,
 } from "./session.js";
 
 const failureCopy: Record<SessionFailure, { readonly icon: ReactNode; readonly title: string; readonly guidance: string }> = {
@@ -26,7 +27,7 @@ async function notificationNamespaceFor(endpoint: string): Promise<string> {
   return [...new Uint8Array(digest).slice(0, 12)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator, repositoryContext, sourceControl }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator; readonly repositoryContext?: RepositoryContextSource; readonly sourceControl?: SourceControlClient }) {
+export function DailyDriverShell({ connector, preferenceStore, environmentNotice, notificationGateway, notificationCoordinator, repositoryContext, sourceControl, sourceControlFactory }: { readonly connector: ClientConnector; readonly preferenceStore: PreferenceStore; readonly environmentNotice?: string; readonly notificationGateway?: NotificationGateway; readonly notificationCoordinator?: NotificationCoordinator; readonly repositoryContext?: RepositoryContextSource; readonly sourceControl?: SourceControlClient; readonly sourceControlFactory?: SourceControlClientFactory }) {
   const [preferences, setPreferences] = useState(() => preferenceStore.load());
   const [lease, setLease] = useState<ClientLease>();
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -35,8 +36,12 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
   const [notificationNamespace, setNotificationNamespace] = useState<string>();
   const [activeNotificationCoordinator, setActiveNotificationCoordinator] = useState<NotificationCoordinator | undefined>(() => notificationCoordinator);
+  const [activeSourceControl, setActiveSourceControl] = useState<SourceControlClient | undefined>(() => sourceControl);
+  const [sourceControlConnected, setSourceControlConnected] = useState(false);
+  const [sourceControlError, setSourceControlError] = useState<string>();
   const formRef = useRef<HTMLFormElement>(null);
   const activeCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
+  const sourceControlCredentialVault = useRef<MemoryCredentialVault | undefined>(undefined);
   const notifications = useRef(notificationGateway ?? new BrowserNotificationGateway());
   const leaseRef = useRef<ClientLease | undefined>(undefined);
   const activeEndpoint = useRef<string | undefined>(undefined);
@@ -58,6 +63,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     attempt.current.vault?.clear();
     leaseRef.current?.close();
     activeCredentialVault.current?.clear();
+    sourceControlCredentialVault.current?.clear();
   }, []);
 
   useEffect(() => {
@@ -74,6 +80,44 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
     preferenceSavePending.current = true;
     setPreferences(update);
   };
+
+  const connectSourceControl = (credential: string) => {
+    if (!sourceControlFactory) return;
+    const nextVault = new MemoryCredentialVault();
+    nextVault.replace(credential);
+    if (!nextVault.read()) {
+      nextVault.clear();
+      setSourceControlError("Enter a GitHub access token for this session.");
+      return;
+    }
+    try {
+      const nextClient = sourceControlFactory(nextVault.read);
+      sourceControlCredentialVault.current?.clear();
+      sourceControlCredentialVault.current = nextVault;
+      setActiveSourceControl(nextClient);
+      setSourceControlConnected(true);
+      setSourceControlError(undefined);
+    } catch {
+      nextVault.clear();
+      setSourceControlError("The GitHub connection could not be configured.");
+    }
+  };
+
+  const disconnectSourceControl = () => {
+    sourceControlCredentialVault.current?.clear();
+    sourceControlCredentialVault.current = undefined;
+    setActiveSourceControl(sourceControl);
+    setSourceControlConnected(false);
+    setSourceControlError(undefined);
+  };
+
+  const failSourceControlAuthentication = useCallback(() => {
+    sourceControlCredentialVault.current?.clear();
+    sourceControlCredentialVault.current = undefined;
+    setActiveSourceControl(sourceControl);
+    setSourceControlConnected(false);
+    setSourceControlError("GitHub authentication failed. Enter a current token and try again.");
+  }, [sourceControl]);
 
   const resetConnection = () => {
     attempt.current.controller.abort();
@@ -182,7 +226,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} {...(repositoryContext ? { repositoryContext } : {})} {...(sourceControl ? { sourceControl } : {})} dailyDriver={{
+      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} {...(repositoryContext ? { repositoryContext } : {})} {...(activeSourceControl ? { sourceControl: activeSourceControl } : {})} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,
@@ -196,6 +240,13 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
         notificationGateway: notifications.current,
         notificationCoordinator: activeNotificationCoordinator,
         notificationNamespace,
+        sourceControlSession: sourceControlFactory ? {
+          status: sourceControlConnected ? "connected" : "disconnected",
+          onConnect: connectSourceControl,
+          onDisconnect: disconnectSourceControl,
+          onAuthenticationFailure: failSourceControlAuthentication,
+          ...(sourceControlError ? { error: sourceControlError } : {}),
+        } : sourceControl ? { status: "fixture" } : { status: "unsupported" },
       }} /></div>}
       {showOnboarding && <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">

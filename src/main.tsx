@@ -13,6 +13,7 @@ import { AgentHostV1Protocol } from "./http/v1-protocol.js";
 import { createLargeDemoSnapshot, demoAdapterHealth } from "./testing/fixtures.js";
 import { MockAgentHostTransport } from "./testing/mock-transport.js";
 import { MockRepositoryContextSource, MockSourceControlClient } from "./testing/repositories/mock-clients.js";
+import { GitHubRestClient } from "./repositories/github/github-rest-client.js";
 import "./styles.css";
 
 const parameters = new URLSearchParams(window.location.search);
@@ -162,6 +163,7 @@ const app = fixtureMode === "onboarding"
       preferenceStore={new LocalPreferenceStore()}
       {...(repositoryContext ? { repositoryContext } : {})}
       {...(sourceControl ? { sourceControl } : {})}
+      {...(realConnector ? { sourceControlFactory: (credential: () => string | undefined) => new GitHubRestClient({ authentication: () => { const token = credential(); return token ? { scheme: "Bearer" as const, token } : undefined; } }) } : {})}
       {...(realConnector ? {} : { environmentNotice: simulationNotice })}
     />
   : <App client={createFixtureClient(fixtureMode)} repositoryContext={new MockRepositoryContextSource()} sourceControl={new MockSourceControlClient()} now={() => Date.parse("2026-01-15T09:31:00.000Z")} />;

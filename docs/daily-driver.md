@@ -20,13 +20,22 @@ unavailable rather than being approximated from the current page.
 
 ## Credential lifetime
 
-- The token input is uncontrolled and cleared immediately on submit.
-- The credential is available only through an in-memory closure while the lease
-  is active.
-- Failure, connection change, page unload, and lease disposal clear it.
+- Agent-host and GitHub token inputs are uncontrolled and cleared immediately on
+  submit.
+- Each credential is available only through its own in-memory closure while its
+  session is active.
+- Failure, explicit disconnect, page unload, and lease disposal clear the
+  applicable credential.
 - Reloading requires the user to authenticate again.
 - Tokens never enter URLs, localStorage, fixtures, diagnostics, or build-time
   configuration.
+
+The Settings surface can create and disconnect a read-only GitHub session. It
+does not infer a repository from cwd: GitHub requests begin only when a
+`RepositoryContextSource` supplies an explicit association. The fixture connector
+uses sanitized source-control data without accepting a real credential. A 401
+from an associated repository clears the GitHub vault and returns Settings to a
+disconnected recovery state so an expired token cannot remain labelled active.
 
 ## Persisted preferences
 
