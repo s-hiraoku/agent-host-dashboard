@@ -20,6 +20,12 @@ agent-host
 
 `src/domain.ts`, `src/client.ts`, and `src/connection.ts` are framework-independent. UI code must not import endpoint paths, wire codecs, or provider-native metadata. A future native client can implement `AgentHostTransport` without depending on the dashboard framework.
 
+Repository and GitHub Issue/PR work uses two additional framework-independent
+ports: `RepositoryContextSource` for agent-to-repository association and
+`SourceControlClient` for read-only forge queries. The separation prevents the
+dashboard from inventing fields that are not present in the confirmed agent-host
+API. See [docs/architecture/repository-context.md](docs/architecture/repository-context.md).
+
 ## Current API compatibility
 
 Agent-host API v1 now publishes version discovery, bounded snapshots, adapter
