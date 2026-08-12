@@ -1,5 +1,6 @@
 import type { AgentHostClient } from "../client.js";
 import { AgentHostError, toAgentHostError } from "../errors.js";
+import type { SourceControlClient } from "../repositories/source-control.js";
 
 export interface ClientLease {
   readonly client: AgentHostClient;
@@ -14,6 +15,8 @@ export interface ClientConnectionInput {
 export interface ClientConnector {
   open(input: ClientConnectionInput, signal: AbortSignal): Promise<ClientLease>;
 }
+
+export type SourceControlClientFactory = (credential: () => string | undefined) => SourceControlClient;
 
 export type SessionFailure = "unavailable" | "unauthorized" | "incompatible" | "error";
 
