@@ -309,6 +309,9 @@ dd { margin: 0; overflow: hidden; color: var(--text); font-size: 0.76rem; text-o
 .approval-context { display: grid; gap: 0.65rem; margin-top: 0.7rem; }
 .approval-context p { margin: 0; color: #d4c7aa; font-size: 0.74rem; line-height: 1.45; }
 .approval-context code { display: block; padding: 0.55rem; border: 1px solid #5c4a24; color: #f1dba8; background: #13130e; font-size: 0.68rem; overflow-wrap: anywhere; }
+.approval-files { display: grid; gap: 0.4rem; margin: 0.35rem 0 0; padding: 0; list-style: none; }
+.approval-files li { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem; align-items: start; }
+.approval-files .mono { color: var(--amber); font-size: 0.68rem; }
 .approval-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.8rem; }
 .approve-button, .reject-button, .primary-button, .secondary-button, .danger-button, .confirm-button { padding: 0.55rem 0.75rem; border: 1px solid var(--line-strong); font-weight: 650; }
 .approve-button, .tone-approval { border-color: #b78223; color: #171006; background: var(--amber); }

@@ -44,7 +44,12 @@ export interface BranchMatchCandidate extends CandidateRepositoryAssociationBase
   readonly checkout: RepositoryCheckoutContext & { readonly branch: string };
 }
 
-export type CandidateRepositoryAssociation = RepositoryMatchCandidate | BranchMatchCandidate;
+export interface HeuristicMatchCandidate extends CandidateRepositoryAssociationBase {
+  readonly reason: "adapter_heuristic";
+  readonly checkout?: RepositoryCheckoutContext;
+}
+
+export type CandidateRepositoryAssociation = RepositoryMatchCandidate | BranchMatchCandidate | HeuristicMatchCandidate;
 
 export type RepositoryAssociation = ConfirmedRepositoryAssociation | CandidateRepositoryAssociation;
 
@@ -53,6 +58,8 @@ export type RepositoryContextResult =
       readonly state: "ready";
       readonly associations: readonly RepositoryAssociation[];
       readonly revision?: number;
+      readonly freshness?: "current" | "stale";
+      readonly complete?: boolean;
     }
   | {
       readonly state: "unsupported";

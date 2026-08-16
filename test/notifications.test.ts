@@ -14,12 +14,12 @@ describe("daily-driver notifications", () => {
   });
 
   it("applies global type and session-only provider/project controls", () => {
-    const notification = { kind: "error" as const, agentId: "session-id", agentName: "Agent", provider: "public-provider", project: "public-project" };
+    const notification = { kind: "error" as const, agentId: "session-id", agentName: "Agent", provider: "public-provider", projectId: "local:abcdefghijklmnopqrstuv", projectName: "public-project" };
     const enabled = { ...defaultPreferences.notifications, enabled: true };
     expect(shouldNotify(notification, enabled, new Set(), new Set())).toBe(true);
     expect(shouldNotify(notification, { ...enabled, enabled: false }, new Set(), new Set())).toBe(false);
     expect(shouldNotify(notification, enabled, new Set([notification.provider]), new Set())).toBe(false);
-    expect(shouldNotify(notification, enabled, new Set(), new Set([notification.project]))).toBe(false);
+    expect(shouldNotify(notification, enabled, new Set(), new Set([notification.projectId]))).toBe(false);
     expect(shouldNotify(notification, { ...enabled, error: false }, new Set(), new Set())).toBe(false);
   });
 

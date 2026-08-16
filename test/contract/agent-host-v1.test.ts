@@ -93,6 +93,78 @@ describe("pinned agent-host v1 client conformance", () => {
     expect(JSON.stringify({ detail, health })).not.toMatch(/token|authorization|metadata/i);
   });
 
+  it("drives additive list-features and file-approval fixtures through the production codec", async () => {
+    const list = fixture<{
+      request: { path: string };
+      responseShape: {
+        revision: number;
+        facets: { revision: number; providers: Array<{ value: string; count: number }>; statuses: Array<{ value: string; count: number }> };
+        page: { sort: string; direction: string; total: number };
+        agentProject: { id: string; name: string; scope: string };
+      };
+    }>("list-features");
+    const file = fixture<{
+      agentId: string;
+      status: string;
+      pendingApproval: Record<string, unknown>;
+      clientRule: string;
+    }>("file-approval");
+    const channel = new FixtureChannel();
+    channel.responses = [
+      {
+        apiVersion: "1",
+        revision: list.responseShape.revision,
+        agents: [{
+          id: "codex:alpha",
+          provider: "codex",
+          source: "codex",
+          name: "Alpha",
+          status: "working",
+          capabilities: {},
+          cwd: "/workspace/project",
+          project: list.responseShape.agentProject,
+        }],
+        page: { limit: 50, total: list.responseShape.page.total, sort: list.responseShape.page.sort, direction: list.responseShape.page.direction },
+        facets: list.responseShape.facets,
+      },
+      {
+        apiVersion: "1",
+        revision: 1,
+        agent: {
+          id: file.agentId,
+          provider: "codex",
+          source: "codex",
+          name: "File change",
+          status: file.status,
+          capabilities: { approve: true, reject: true },
+          pendingApprovals: [file.pendingApproval],
+        },
+      },
+    ];
+    const protocol = new AgentHostV1Protocol();
+    const snapshot = await protocol.snapshot(channel, { limit: 50, filter: { view: "recent", providers: ["codex"] }, sort: { field: "name", direction: "asc" } });
+    const detail = await protocol.detail(channel, file.agentId);
+
+    expect(sameRequestPath(channel.requests[0]!.path, list.request.path)).toBe(true);
+    expect(snapshot.sort).toEqual({ field: "name", direction: "asc" });
+    expect(snapshot.facets).toEqual({
+      revision: 12,
+      byProvider: { codex: 2, herdr: 1 },
+      byStatus: { blocked: 1, working: 1 },
+    });
+    expect(snapshot.agents[0]?.project).toEqual(list.responseShape.agentProject);
+    expect(detail.pendingApprovals[0]).toMatchObject({
+      id: "fixture-file-approval-1",
+      kind: "file",
+      actionable: true,
+      files: [
+        { path: "src/agent.js", kind: "update" },
+        { path: "test/agent.test.js", kind: "add" },
+      ],
+    });
+    expect(file.clientRule).toMatch(/Never offer approve or reject when actionable is false/);
+  });
+
   it("applies the official reconnect rule for sequence and ready gaps", async () => {
     const pinned = fixture<{
       firstConnection: { ready: Record<string, unknown>; event: { type: string; sequence: number; snapshotRevision: number } };
@@ -127,5 +199,98 @@ describe("pinned agent-host v1 client conformance", () => {
     expect(manifest.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(manifest.largeList).toMatchObject({ gitBlobSha: "75a40a60e80f331673a5d6086b8b924dd3564e05", bytes: 544491, agentCount: 1000 });
     expect(createLargeDemoSnapshot(manifest.largeList.agentCount).agents).toHaveLength(1000);
+  });
+
+  it("drives repository-association fixtures through the production codec", async () => {
+    const pinned = fixture<{
+      capability: { path: string; name: string; version: string; maxItems: number };
+      request: { method: string; pathTemplate: string };
+      cases: {
+        zero: { agentId: string; response: { state: string; freshness: string; complete: boolean; associations: unknown[] } };
+        one: { agentId: string; associationCount: number; repository: { forge: string; host: string; coordinates: { kind: string; owner: string; name: string }; webUrl: string } };
+        unsupported: { agentId: string; state: string; reason: string };
+      };
+      changedAssociation: { agentId: string; event: string; payloadRule: string };
+      hostUnsupportedRule: string;
+    }>("repository-associations");
+    const channel = new FixtureChannel();
+    channel.responses = [
+      {
+        apiVersion: "1",
+        capabilities: {
+          repositoryAssociations: {
+            status: "supported",
+            versions: [pinned.capability.version],
+            maxItems: pinned.capability.maxItems,
+            events: [pinned.changedAssociation.event],
+            replay: false,
+          },
+        },
+      },
+      {
+        apiVersion: "1",
+        associationVersion: pinned.capability.version,
+        revision: 1,
+        agentId: pinned.cases.zero.agentId,
+        ...pinned.cases.zero.response,
+      },
+      {
+        apiVersion: "1",
+        associationVersion: pinned.capability.version,
+        revision: 1,
+        agentId: pinned.cases.one.agentId,
+        state: "ready",
+        freshness: "current",
+        complete: true,
+        associations: [{
+          kind: "confirmed",
+          repository: pinned.cases.one.repository,
+          provenance: { source: "adapter-authoritative", confidence: "high" },
+        }],
+      },
+      {
+        apiVersion: "1",
+        associationVersion: pinned.capability.version,
+        revision: 1,
+        agentId: pinned.cases.unsupported.agentId,
+        state: pinned.cases.unsupported.state,
+        reason: pinned.cases.unsupported.reason,
+      },
+    ];
+    const protocol = new AgentHostV1Protocol();
+
+    const capability = await protocol.repositoryCapability(channel);
+    const zero = await protocol.repositoryContext(channel, pinned.cases.zero.agentId);
+    const one = await protocol.repositoryContext(channel, pinned.cases.one.agentId);
+    const unsupported = await protocol.repositoryContext(channel, pinned.cases.unsupported.agentId);
+
+    expect(sameRequestPath(channel.requests[0]!.path, pinned.capability.path)).toBe(true);
+    expect(capability).toMatchObject({ versions: [pinned.capability.version], maxItems: pinned.capability.maxItems, replay: false });
+    expect(zero).toEqual({
+      state: "ready",
+      freshness: "current",
+      complete: true,
+      associations: [],
+      revision: 1,
+    });
+    expect(one.state).toBe("ready");
+    if (one.state !== "ready") return;
+    expect(one.associations).toHaveLength(pinned.cases.one.associationCount);
+    expect(one).toMatchObject({
+      state: "ready",
+      associations: [{
+        kind: "confirmed",
+        repository: {
+          service: "github",
+          host: pinned.cases.one.repository.host,
+          owner: pinned.cases.one.repository.coordinates.owner,
+          name: pinned.cases.one.repository.coordinates.name,
+        },
+      }],
+    });
+    expect(unsupported).toEqual({ state: "unsupported", reason: pinned.cases.unsupported.reason });
+    expect(channel.requests[2]?.path).toBe(pinned.request.pathTemplate.replace("{agentId}", encodeURIComponent(pinned.cases.one.agentId)));
+    expect(pinned.changedAssociation.payloadRule).toMatch(/never expect repository identity/);
+    expect(pinned.hostUnsupportedRule).toMatch(/404 for the capability endpoint means unsupported/);
   });
 });

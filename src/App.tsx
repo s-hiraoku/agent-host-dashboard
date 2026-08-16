@@ -35,7 +35,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
-import { agentActions, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
+import { agentActions, canDecideApproval, projectDisplayName, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
 import { useDashboard, type DashboardActionRecord, type DashboardQuery } from "./dashboard/use-dashboard.js";
 import { requiresRepositoryAuthentication, useRepositoryOverview } from "./dashboard/use-repository-overview.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
@@ -171,12 +171,25 @@ function ConfirmDialog({
 }
 
 function ApprovalContext({ approval }: { readonly approval: ApprovalRequest }) {
+  const files = approval.files ?? [];
+  const fileCount = approval.fileCount ?? files.length;
   return (
     <div className="approval-context">
       <div className="approval-title"><Command aria-hidden="true" /><strong>{approval.summary}</strong></div>
       {approval.reason && <p>{approval.reason}</p>}
       {approval.command && <div><span className="field-label">Command</span><code>{approval.command}</code></div>}
-      {approval.path && <div><span className="field-label">File</span><code>{approval.path}</code></div>}
+      {approval.path && files.length === 0 && <div><span className="field-label">File</span><code>{approval.path}</code></div>}
+      {files.length > 0 && (
+        <div>
+          <span className="field-label">Files</span>
+          <ul className="approval-files">
+            {files.map((file) => (
+              <li key={`${file.kind}:${file.path}`}><span className="mono">{file.kind}</span><code>{file.path}</code></li>
+            ))}
+          </ul>
+          {approval.truncated && <p className="keyboard-warning" role="status">Showing {files.length} of {fileCount} files. The list is truncated.</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -191,14 +204,16 @@ function RepositoryPanel({
   agentId,
   contextSource,
   sourceControl,
+  epoch = 0,
   onAuthenticationFailure,
 }: {
   readonly agentId: string;
   readonly contextSource: RepositoryContextSource | undefined;
   readonly sourceControl: SourceControlClient | undefined;
+  readonly epoch?: number;
   readonly onAuthenticationFailure?: () => void;
 }) {
-  const overview = useRepositoryOverview(agentId, contextSource, sourceControl);
+  const overview = useRepositoryOverview(agentId, contextSource, sourceControl, epoch);
   const state = overview.state;
   useEffect(() => {
     if (requiresRepositoryAuthentication(state)) onAuthenticationFailure?.();
@@ -228,6 +243,8 @@ function RepositoryPanel({
           </div>
         </article>
       ))}
+      {contextSource && state.status === "ready" && state.freshness === "stale" && <p className="repository-limit" role="status">Repository association is stale. Refresh to refetch the current mapping.</p>}
+      {contextSource && state.status === "ready" && state.complete === false && <p className="repository-limit" role="status">Some repository associations were omitted because they were incomplete or unsupported.</p>}
       {contextSource && state.status === "ready" && state.truncated && <p className="repository-limit" role="status">Showing the first 8 associated repositories.</p>}
     </section>
   );
@@ -276,9 +293,9 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
         <section className="approval-card" key={approval.id} aria-labelledby={`approval-${approval.id}`}>
           <div className="approval-title"><ShieldAlert aria-hidden="true" /><h3 id={`approval-${approval.id}`}>Pending approval</h3></div>
           <ApprovalContext approval={approval} />
-          {approval.kind === "other" && <p className="keyboard-warning" role="status">Approve and reject are disabled because the host did not expose command or file context for this request.</p>}
+          {!canDecideApproval(approval) && <p className="keyboard-warning" role="status">{approval.actionable === false ? "Approve and reject are disabled because this request is not actionable." : approval.truncated ? "Approve and reject are disabled because the file list is truncated." : "Approve and reject are disabled because the host did not expose command or file context for this request."}</p>}
           <div className="approval-actions">
-            {approval.kind !== "other" && detail.capabilities.reject && (
+            {canDecideApproval(approval) && detail.capabilities.reject && (
               <button type="button" className="reject-button" disabled={busy} onClick={() => setPending({
                 title: "Reject this request?",
                 label: "Reject request",
@@ -288,7 +305,7 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
                 body: <ApprovalContext approval={approval} />,
               })}><X aria-hidden="true" />Reject</button>
             )}
-            {approval.kind !== "other" && detail.capabilities.approve && (
+            {canDecideApproval(approval) && detail.capabilities.approve && (
               <button type="button" className="approve-button" disabled={busy} onClick={() => setPending({
                 title: "Approve this exact request?",
                 label: "Approve request",
@@ -373,11 +390,11 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
   readonly notificationError: string | undefined;
   readonly onRequestNotifications: () => void;
   readonly providers: readonly string[];
-  readonly projects: readonly string[];
+  readonly projects: readonly { readonly id: string; readonly name: string }[];
   readonly mutedProviders: ReadonlySet<string>;
   readonly mutedProjects: ReadonlySet<string>;
   readonly onToggleProvider: (provider: string) => void;
-  readonly onToggleProject: (project: string) => void;
+  readonly onToggleProject: (projectId: string) => void;
 }) {
   const update = (patch: Partial<DashboardPreferences>) => controls.onPreferencesChange((current) => ({ ...current, ...patch }));
   const updateNotifications = (patch: Partial<DashboardPreferences["notifications"]>) => controls.onPreferencesChange((current) => ({ ...current, notifications: { ...current.notifications, ...patch } }));
@@ -408,9 +425,9 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
           <label><input type="checkbox" checked={controls.preferences.notifications.completed} onChange={(event) => updateNotifications({ completed: event.target.checked })} />Completed agents</label>
           <label><input type="checkbox" checked={controls.preferences.notifications.error} onChange={(event) => updateNotifications({ error: event.target.checked })} />Agent errors</label>
         </fieldset>
-        <details><summary>Provider and project controls · this session only</summary>
-          <p className="hint">Scopes accumulate as they are observed in this session and remain in memory. Project enumeration may be incomplete until agent-host exposes safe public facets.</p>
-          <div className="notification-scopes"><fieldset><legend>Providers</legend>{providers.map((provider) => <label key={provider}><input type="checkbox" checked={!mutedProviders.has(provider)} onChange={() => onToggleProvider(provider)} />{provider}</label>)}</fieldset><fieldset><legend>Projects</legend>{projects.map((project) => <label key={project}><input type="checkbox" checked={!mutedProjects.has(project)} onChange={() => onToggleProject(project)} />{project}</label>)}</fieldset></div>
+        <details><summary>Provider and project controls</summary>
+          <p className="hint">Provider mutes stay in this session. Local project mutes persist as opaque public ids, never as cwd or directory names.</p>
+          <div className="notification-scopes"><fieldset><legend>Providers</legend>{providers.map((provider) => <label key={provider}><input type="checkbox" checked={!mutedProviders.has(provider)} onChange={() => onToggleProvider(provider)} />{provider}</label>)}</fieldset><fieldset><legend>Projects</legend>{projects.map((project) => <label key={project.id}><input type="checkbox" checked={!mutedProjects.has(project.id)} onChange={() => onToggleProject(project.id)} />{project.name} <span className="muted">(local)</span></label>)}</fieldset></div>
         </details>
       </section>
       <section className="settings-card" aria-labelledby="connection-settings-heading">
@@ -439,7 +456,7 @@ function PrivacySurface({ onWorkspace, onClear }: { readonly onWorkspace: () => 
       <header className="settings-heading"><div><p className="eyebrow">Local data boundary</p><h1>Privacy</h1></div><button className="secondary-button" type="button" onClick={onWorkspace}><LayoutDashboard />Workspace</button></header>
       <section className="settings-card privacy-card">
         <LockKeyhole aria-hidden="true" />
-        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, saved view names, and global notification-type toggles may be stored locally. Credentials, provider/project scopes, recent agents, action history, prompt drafts, commands, cwd values, repository names and URLs, Issue/PR content, branches, worktrees, raw JSON, and agent snapshots are never persisted.</p></div>
+        <div><h2>Only non-secret preferences persist</h2><p>Endpoint, semantic filters, sort, density, columns, saved view names, global notification-type toggles, and opaque local project ids may be stored locally. Credentials, provider scopes, recent agents, action history, prompt drafts, commands, cwd values, repository names and URLs, Issue/PR content, branches, worktrees, raw JSON, and agent snapshots are never persisted.</p></div>
       </section>
       <section className="settings-card">
         <div><p className="eyebrow">Reset</p><h2>Clear local dashboard data</h2><p>This removes saved views and appearance choices from storage. The current workspace stays in memory until reload; the active credential is cleared when you change connection.</p></div>
@@ -505,10 +522,10 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
   const [notificationError, setNotificationError] = useState<string>();
   const [savedViewMessage, setSavedViewMessage] = useState<string>();
   const [mutedProviders, setMutedProviders] = useState<ReadonlySet<string>>(() => new Set());
-  const [mutedProjects, setMutedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [mutedProjects, setMutedProjects] = useState<ReadonlySet<string>>(() => new Set(dailyDriver?.preferences.notifications.suppressedProjectIds ?? []));
   const [recentAgents, setRecentAgents] = useState<readonly RecentAgent[]>([]);
   const [observedProviders, setObservedProviders] = useState<ReadonlySet<string>>(() => new Set());
-  const [observedProjects, setObservedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [observedProjects, setObservedProjects] = useState<ReadonlyMap<string, string>>(() => new Map());
   const seenNotificationEvents = useRef(new Set<string>());
   const searchRef = useRef<HTMLInputElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -524,9 +541,18 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
   const currentTime = now();
 
   const notificationProviders = useMemo(() => [...observedProviders].sort(), [observedProviders]);
-  const notificationProjects = useMemo(() => [...observedProjects].sort(), [observedProjects]);
+  const notificationProjects = useMemo(
+    () => [...observedProjects.entries()].map(([id, name]) => ({ id, name })).sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
+    [observedProjects],
+  );
 
-  const rememberAgent = (agent: RecentAgent) => setRecentAgents((current) => [agent, ...current.filter((candidate) => candidate.id !== agent.id)].slice(0, 12));
+  const rememberAgent = (agent: { readonly id: string; readonly name: string; readonly provider: string; readonly status: AgentStatus; readonly project?: { readonly name: string } }) => setRecentAgents((current) => [{
+    id: agent.id,
+    name: agent.name,
+    provider: agent.provider,
+    status: agent.status,
+    ...(agent.project ? { project: agent.project.name } : {}),
+  }, ...current.filter((candidate) => candidate.id !== agent.id)].slice(0, 12));
 
   useEffect(() => {
     if (scenario !== "blocked" && scenario !== "error") return;
@@ -544,7 +570,17 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       ...model.events.flatMap((event) => event.type === "agent.upserted" ? [event.agent] : []),
     ];
     setObservedProviders((current) => mergeObserved(current, [...Object.keys(model.snapshot?.facets?.byProvider ?? {}), ...agents.map((agent) => agent.provider)]));
-    setObservedProjects((current) => mergeObserved(current, agents.flatMap((agent) => agent.project ? [agent.project] : [])));
+    setObservedProjects((current) => {
+      const projects = agents.flatMap((agent) => agent.project ? [agent.project] : []);
+      let changed = false;
+      const next = new Map(current);
+      for (const project of projects) {
+        if (current.get(project.id) === project.name) continue;
+        next.set(project.id, project.name);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
   }, [model.events, model.snapshot?.agents, model.snapshot?.facets?.byProvider]);
 
   useEffect(() => {
@@ -558,7 +594,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       const label = notification.kind === "completed" ? "completed" : `is ${notification.kind}`;
       const publicCoordinationKey = `${dailyDriver.notificationNamespace}:${event.revision}:${notification.kind}`;
       void dailyDriver.notificationCoordinator.runOnce(publicCoordinationKey, () => dailyDriver.notificationGateway.show(`${notification.agentName} ${label}`, {
-        body: [notification.provider, notification.project].filter(Boolean).join(" · "),
+        body: [notification.provider, notification.projectName].filter(Boolean).join(" · "),
         tag: publicCoordinationKey,
       }, () => {
         void client.detail(notification.agentId).then((detail) => {
@@ -583,12 +619,25 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
     });
   };
 
-  const toggleScope = (setter: (value: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => void, value: string) => setter((current) => {
+  const toggleProvider = (provider: string) => setMutedProviders((current) => {
     const next = new Set(current);
-    if (next.has(value)) next.delete(value);
-    else next.add(value);
+    if (next.has(provider)) next.delete(provider);
+    else next.add(provider);
     return next;
   });
+
+  const toggleProject = (projectId: string) => {
+    setMutedProjects((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      dailyDriver?.onPreferencesChange((preferences) => ({
+        ...preferences,
+        notifications: { ...preferences.notifications, suppressedProjectIds: [...next] },
+      }));
+      return next;
+    });
+  };
 
   const goWorkspace = () => setSurface("workspace");
 
@@ -662,7 +711,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       </header>
       {dailyDriver?.environmentNotice && <div className="environment-notice" role="status"><ShieldAlert aria-hidden="true" />{dailyDriver.environmentNotice}</div>}
 
-      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} notificationError={notificationError} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={(provider) => toggleScope(setMutedProviders, provider)} onToggleProject={(project) => toggleScope(setMutedProjects, project)} />}
+      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} notificationError={notificationError} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={toggleProvider} onToggleProject={toggleProject} />}
       {surface === "activity" && dailyDriver && <ActivitySurface recentAgents={recentAgents} actionHistory={model.actionHistory} onWorkspace={goWorkspace} onSelect={(agentId) => { model.select(agentId); goWorkspace(); }} onClear={() => { setRecentAgents([]); model.clearActionHistory(); }} />}
       {surface === "diagnostics" && dailyDriver && <DiagnosticsSurface model={model} onWorkspace={goWorkspace} />}
       {surface === "privacy" && dailyDriver && <PrivacySurface onWorkspace={goWorkspace} onClear={dailyDriver.onClearPreferences} />}
@@ -707,7 +756,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
               <li key={agent.id}>
                 <button type="button" className={`agent-row ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => { rememberAgent(agent); model.select(agent.id); }} aria-current={agent.id === model.selectedId ? "true" : undefined}>
                   <span className="agent-row-top"><strong>{agent.name}</strong><StatusBadge status={agent.status} /></span>
-                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span>{agent.project ?? "No project"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
+                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span>{projectDisplayName(agent.project) ? `${projectDisplayName(agent.project)} (local)` : "No project"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
                 </button>
               </li>
             ))}
@@ -729,13 +778,13 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
               </header>
               <dl className="agent-facts">
                 <div><dt>Provider</dt><dd>{model.detail.provider}</dd></div>
-                <div><dt>Project</dt><dd>{model.detail.project ?? "Not reported"}</dd></div>
+                <div><dt>Project</dt><dd>{model.detail.project ? `${model.detail.project.name} (local)` : "Not reported"}</dd></div>
                 <div><dt>Source</dt><dd>{model.detail.provenance.source} · {model.detail.provenance.confidence ?? "unknown"}</dd></div>
                 <div className="wide"><dt>Working directory</dt><dd className="mono">{model.detail.cwd ?? "Not reported"}</dd></div>
                 <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
               </dl>
               <div className="capability-row"><span className="field-label">Public capabilities</span><div>{agentActions.filter((action) => model.detail?.capabilities[action]).map((action) => <span className="capability" key={action}>{action}</span>)}</div></div>
-              {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} {...(dailyDriver?.sourceControlSession?.onAuthenticationFailure ? { onAuthenticationFailure: dailyDriver.sourceControlSession.onAuthenticationFailure } : {})} />}
+              {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} epoch={model.repositoryEpoch} {...(dailyDriver?.sourceControlSession?.onAuthenticationFailure ? { onAuthenticationFailure: dailyDriver.sourceControlSession.onAuthenticationFailure } : {})} />}
               <section className="timeline" aria-labelledby="timeline-heading">
                 <div className="section-heading"><div><p className="eyebrow">Semantic stream</p><h3 id="timeline-heading">Live events</h3></div><span className="live-indicator"><Activity aria-hidden="true" />Live</span></div>
                 <ol>

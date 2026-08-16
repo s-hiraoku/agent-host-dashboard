@@ -346,6 +346,63 @@ describe("evaluation dashboard", () => {
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });
 
+  it("keeps truncated file-change context display-only", async () => {
+    const transport = new MockAgentHostTransport();
+    const detail = transport.detail.bind(transport);
+    transport.detail = async (agentId, options) => {
+      const current = await detail(agentId, options);
+      if (agentId !== "demo:agent-0008") return current;
+      return {
+        ...current,
+        pendingApprovals: [{
+          id: "truncated-approval",
+          kind: "file",
+          summary: "File change request",
+          actionable: true,
+          files: [{ path: "src/agent.js", kind: "update" }],
+          fileCount: 21,
+          truncated: true,
+        }],
+      };
+    };
+    const { user } = renderDashboard(transport);
+
+    await user.selectOptions(screen.getByLabelText("Status"), "blocked");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0008/ }))[0]!);
+
+    expect(await screen.findByText("Approve and reject are disabled because the file list is truncated.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+  });
+
+  it("reviews sanitized file-change context before an explicit approval", async () => {
+    const { transport, user } = renderDashboard();
+    await user.selectOptions(screen.getByLabelText("Status"), "blocked");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0008/ }))[0]!);
+
+    expect(await screen.findByText("src/agent.js")).toBeInTheDocument();
+    expect(screen.getByText("test/agent.test.js")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    expect(within(screen.getByRole("dialog")).getByText("src/agent.js")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve request" }));
+    await waitFor(() => expect(transport.actions[0]?.action).toMatchObject({ kind: "approve" }));
+  });
+
+  it("enables global sort and keeps the current selection", async () => {
+    const { user } = renderDashboard();
+    await screen.findByText("50 shown of 1000");
+    const selected = (await screen.findAllByRole("button", { name: /Sanitized agent/ }))[0]!;
+    const name = selected.querySelector("strong")?.textContent;
+    expect(name).toBeTruthy();
+    await user.click(selected);
+    const sort = screen.getByLabelText("Sort");
+    expect(sort).toBeEnabled();
+    await user.selectOptions(sort, "name:asc");
+    expect(sort).toHaveValue("name:asc");
+    expect(screen.queryByText(/alternate global sorts are disabled/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: name!, level: 2 })).toBeInTheDocument();
+  });
+
   it("restores focus after cancellation and suppresses duplicate actions", async () => {
     let releaseAction: () => void = () => undefined;
     const transport = new MockAgentHostTransport();

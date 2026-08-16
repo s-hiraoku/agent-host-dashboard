@@ -8,6 +8,7 @@ export * from "./http/protocol.js";
 export * from "./http/v1-protocol.js";
 export * from "./http/sse.js";
 export * from "./http/types.js";
+export * from "./repositories/agent-host-context-source.js";
 export * from "./repositories/context-source.js";
 export * from "./repositories/domain.js";
 export * from "./repositories/github/github-rest-client.js";

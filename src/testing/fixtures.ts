@@ -1,6 +1,21 @@
-import type { AdapterHealth, AgentDetail, AgentSnapshot, AgentSummary } from "../domain.js";
+import type { AdapterHealth, AgentDetail, AgentProject, AgentSnapshot, AgentSummary } from "../domain.js";
 
 const timestamp = "2026-01-15T09:30:00.000Z";
+
+function demoProject(name: string): AgentProject {
+  let hash = 2166136261;
+  for (let index = 0; index < 22; index += 1) {
+    hash = Math.imul(hash ^ (name.charCodeAt(index % name.length) + index), 16777619) >>> 0;
+  }
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz-";
+  let id = "";
+  let value = hash;
+  for (let index = 0; index < 22; index += 1) {
+    value = Math.imul(value ^ (name.charCodeAt(index % name.length) + index * 13), 16777619) >>> 0;
+    id += alphabet[value & 63];
+  }
+  return { id: `local:${id}`, name, scope: "local" };
+}
 
 export const demoAgents: readonly AgentDetail[] = [
   {
@@ -11,7 +26,7 @@ export const demoAgents: readonly AgentDetail[] = [
     capabilities: { prompt: true, read: true, interrupt: true },
     cwd: "/workspace/orbit",
     lastActivityAt: timestamp,
-    project: "orbit",
+    project: demoProject("orbit"),
     provenance: { source: "demo", confidence: "high", view: "active" },
     pendingApprovals: [],
   },
@@ -23,7 +38,7 @@ export const demoAgents: readonly AgentDetail[] = [
     capabilities: { read: true, approve: true, reject: true },
     cwd: "/workspace/harbor",
     lastActivityAt: "2026-01-15T09:29:10.000Z",
-    project: "harbor",
+    project: demoProject("harbor"),
     provenance: { source: "demo", confidence: "high", view: "active" },
     pendingApprovals: [
       {
@@ -43,7 +58,7 @@ export const demoAgents: readonly AgentDetail[] = [
     capabilities: { read: true, prompt: true },
     cwd: "/workspace/atlas",
     lastActivityAt: "2026-01-15T09:22:00.000Z",
-    project: "atlas",
+    project: demoProject("atlas"),
     provenance: { source: "demo", confidence: "high", view: "recent" },
     pendingApprovals: [],
   },
@@ -55,7 +70,7 @@ export const demoAgents: readonly AgentDetail[] = [
     capabilities: { read: true },
     cwd: "/workspace/ember",
     lastActivityAt: "2026-01-15T09:18:00.000Z",
-    project: "ember",
+    project: demoProject("ember"),
     provenance: { source: "demo", confidence: "medium", view: "recent" },
     pendingApprovals: [],
   },
@@ -67,7 +82,7 @@ export const demoAgents: readonly AgentDetail[] = [
     capabilities: { prompt: true },
     cwd: "/workspace/quartz",
     lastActivityAt: "2026-01-15T08:55:00.000Z",
-    project: "quartz",
+    project: demoProject("quartz"),
     provenance: { source: "demo", confidence: "high", view: "recent" },
     pendingApprovals: [],
   },
@@ -125,7 +140,7 @@ export function createLargeDemoSnapshot(count = 1_000, revision = 40): AgentSnap
       id: `demo:agent-${String(index + 1).padStart(4, "0")}`,
       name: `Sanitized agent ${String(index + 1).padStart(4, "0")}`,
       cwd: `/workspace/project-${index % 20}`,
-      project: `project-${index % 20}`,
+      project: demoProject(`project-${index % 20}`),
     };
   });
   return { agents, revision, total: count };

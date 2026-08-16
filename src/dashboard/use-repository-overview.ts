@@ -32,7 +32,7 @@ export interface RepositoryOverviewFailure {
 
 export type RepositoryOverviewState =
   | { readonly status: "idle" | "loading" }
-  | { readonly status: "ready"; readonly entries: readonly RepositoryOverviewEntry[]; readonly failures: readonly RepositoryOverviewFailure[]; readonly truncated: boolean }
+  | { readonly status: "ready"; readonly entries: readonly RepositoryOverviewEntry[]; readonly failures: readonly RepositoryOverviewFailure[]; readonly truncated: boolean; readonly freshness?: "current" | "stale"; readonly complete?: boolean }
   | { readonly status: "unsupported" | "unavailable"; readonly message: string; readonly retryable: boolean }
   | { readonly status: "error"; readonly code: string; readonly message: string; readonly retryAt?: string };
 
@@ -103,6 +103,7 @@ export function useRepositoryOverview(
   agentId: string | undefined,
   contextSource: RepositoryContextSource | undefined,
   sourceControl: SourceControlClient | undefined,
+  epoch = 0,
 ): { readonly state: RepositoryOverviewState; refresh(): void } {
   const [generation, setGeneration] = useState(0);
   const [state, setState] = useState<RepositoryOverviewState>({ status: "idle" });
@@ -180,7 +181,16 @@ export function useRepositoryOverview(
           const failed = results.find((result) => result.status === "error");
           if (failed?.status === "error") throw failed.error;
         }
-        if (!controller.signal.aborted) setState({ status: "ready", entries, failures, truncated: locators.length > selected.length });
+        if (!controller.signal.aborted) {
+          setState({
+            status: "ready",
+            entries,
+            failures,
+            truncated: locators.length > selected.length,
+            ...(context.freshness === undefined ? {} : { freshness: context.freshness }),
+            ...(context.complete === undefined ? {} : { complete: context.complete }),
+          });
+        }
       })
       .catch((failure: unknown) => {
         if (controller.signal.aborted) return;
@@ -195,7 +205,7 @@ export function useRepositoryOverview(
         });
       });
     return () => controller.abort(new DOMException("selection changed", "AbortError"));
-  }, [agentId, contextSource, generation, sourceControl]);
+  }, [agentId, contextSource, epoch, generation, sourceControl]);
 
   return { state, refresh: useCallback(() => setGeneration((current) => current + 1), []) };
 }

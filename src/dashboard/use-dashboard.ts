@@ -44,6 +44,7 @@ export interface DashboardModel {
   readonly error: string | undefined;
   readonly actionResult: AgentActionResult | undefined;
   readonly actionHistory: readonly DashboardActionRecord[];
+  readonly repositoryEpoch: number;
   setQuery(query: DashboardQuery): void;
   select(agentId: string): void;
   nextPage(): void;
@@ -86,7 +87,7 @@ function matchesQuery(agent: AgentSummary, query: DashboardQuery): boolean {
   return (
     (query.status === "all" || agent.status === query.status) &&
     (!query.provider || agent.provider === query.provider) &&
-    (!text || [agent.name, agent.provider, agent.cwd, agent.project].some((value) => value?.toLocaleLowerCase().includes(text)))
+    (!text || [agent.name, agent.provider, agent.cwd, agent.project?.name].some((value) => value?.toLocaleLowerCase().includes(text)))
   );
 }
 
@@ -115,6 +116,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
   const [actionHistory, setActionHistory] = useState<readonly DashboardActionRecord[]>([]);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [detailGeneration, setDetailGeneration] = useState(0);
+  const [repositoryEpoch, setRepositoryEpoch] = useState(0);
   const actionSequence = useRef(0);
   const queryRef = useRef(query);
   const onQueryChangeRef = useRef(options.onQueryChange);
@@ -222,6 +224,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       },
       onSnapshot: (authoritativeSnapshot) => {
         if (active) {
+          if (snapshotReady.current) setRepositoryEpoch((current) => current + 1);
           knownStatuses.current = new Map(authoritativeSnapshot.agents.map((agent) => [agent.id, agent.status]));
           snapshotReady.current = true;
           if (selectedIdRef.current) setDetailGeneration((current) => current + 1);
@@ -253,6 +256,8 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
           }
         } else if (event.type === "action.completed" && event.agentId === selectedIdRef.current) {
           setDetailGeneration((current) => current + 1);
+        } else if (event.type === "agent.repository-associations.changed" && event.agentId === selectedIdRef.current) {
+          setRepositoryEpoch((current) => current + 1);
         }
         const ordinal = eventOrdinal.current + 1;
         eventOrdinal.current = ordinal;
@@ -392,6 +397,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       error: detailError ?? loadError ?? connectionError,
       actionResult,
       actionHistory,
+      repositoryEpoch,
       setQuery,
       select,
       nextPage,
@@ -424,6 +430,7 @@ export function useDashboard(client: AgentHostClient, options: DashboardOptions 
       select,
       setQuery,
       snapshot,
+      repositoryEpoch,
     ],
   );
 }

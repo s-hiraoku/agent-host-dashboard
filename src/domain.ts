@@ -6,10 +6,19 @@ export type AgentActionKind = (typeof agentActions)[number];
 
 export type AgentCapabilities = Readonly<Partial<Record<AgentActionKind, true>>>;
 
+export const fileChangeKinds = ["add", "delete", "update"] as const;
+export type FileChangeKind = (typeof fileChangeKinds)[number];
+
 export interface AgentProvenance {
   readonly source: string;
   readonly confidence?: "low" | "medium" | "high";
   readonly view?: "active" | "recent" | "historical" | "raw";
+}
+
+export interface AgentProject {
+  readonly id: string;
+  readonly name: string;
+  readonly scope: "local";
 }
 
 export interface AgentSummary {
@@ -20,8 +29,13 @@ export interface AgentSummary {
   readonly capabilities: AgentCapabilities;
   readonly cwd?: string;
   readonly lastActivityAt?: string;
-  readonly project?: string;
+  readonly project?: AgentProject;
   readonly provenance: AgentProvenance;
+}
+
+export interface ApprovalFile {
+  readonly path: string;
+  readonly kind: FileChangeKind;
 }
 
 export interface ApprovalRequest {
@@ -31,6 +45,10 @@ export interface ApprovalRequest {
   readonly reason?: string;
   readonly command?: string;
   readonly path?: string;
+  readonly actionable?: boolean;
+  readonly files?: readonly ApprovalFile[];
+  readonly fileCount?: number;
+  readonly truncated?: boolean;
 }
 
 export interface AgentDetail extends AgentSummary {
@@ -80,7 +98,9 @@ export interface AgentSnapshot {
   readonly eventSequence?: number;
   readonly nextCursor?: string;
   readonly total?: number;
+  readonly sort?: AgentSort;
   readonly facets?: {
+    readonly revision?: number;
     readonly byStatus: Readonly<Partial<Record<AgentStatus, number>>>;
     readonly byProvider: Readonly<Record<string, number>>;
   };
@@ -116,8 +136,23 @@ export type AgentEvent =
   | { readonly type: "agent.removed"; readonly revision: number; readonly sequence?: number; readonly agentId: string }
   | { readonly type: "adapter.health"; readonly revision: number; readonly sequence?: number; readonly adapter: AdapterHealth }
   | { readonly type: "action.completed"; readonly revision: number; readonly sequence?: number; readonly agentId: string; readonly actionId: string; readonly ok: boolean }
+  | { readonly type: "agent.repository-associations.changed"; readonly revision: number; readonly sequence?: number; readonly agentId: string }
   | { readonly type: "heartbeat"; readonly revision: number; readonly sequence?: number };
 
 export function canPerform(capabilities: AgentCapabilities, action: AgentActionKind): boolean {
   return capabilities[action] === true;
+}
+
+export function canDecideApproval(approval: ApprovalRequest): boolean {
+  if (approval.actionable === false || approval.truncated) return false;
+  if (approval.kind === "command") return true;
+  return approval.kind === "file" && (approval.files?.length ?? 0) > 0;
+}
+
+export function projectDisplayName(project: AgentProject | undefined): string | undefined {
+  return project?.name;
+}
+
+export function localProjectIdPattern(): RegExp {
+  return /^local:[A-Za-z0-9_-]{22}$/;
 }

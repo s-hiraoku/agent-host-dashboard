@@ -6,14 +6,13 @@ agent summaries, details, capabilities, health records, revisions, and events
 fail CI before they reach the dashboard.
 
 The checked-in schema is a dashboard fixture contract, not an agent-host wire
-contract. Agent-host issues #2 and #6 now provide API v1 and official sanitized
-client-conformance fixtures. `contracts/agent-host-v1/` pins the sanitized
-language-neutral fixtures at the audited backend commit. `npm run test:contract`
+contract. Agent-host API v1 now includes official sanitized client-conformance
+fixtures for list sorting/facets/project identity, file-change approvals, and
+versioned repository associations. `contracts/agent-host-v1/` pins those
+language-neutral fixtures at the audited companion commit. `npm run test:contract`
 drives the v1 codec from them, and `npm run test:conformance:live` starts from the
 built client module and verifies a real demo host only through public HTTP/SSE.
-CI checks out the pinned agent-host commit for that live gate. Remaining global
-sort, facet, and file-approval-context gaps are tracked in
-`docs/agent-host-contract-blockers.md`.
+CI checks out the pinned agent-host commit for that live gate.
 
 ## Local quality commands
 
@@ -37,7 +36,7 @@ Playwright retains a trace and screenshot for failed tests under
 
 The live command expects the pinned agent-host demo on port 48777. From a sibling
 `agent-host` checkout at commit
-`9344c8287331a34a88f640cd17e9d82c280bbf45`, start it with a disposable test
+`92fcec225820dea26f31dd02ff4a7f29de55b227`, start it with a disposable test
 credential:
 
 ```bash

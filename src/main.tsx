@@ -13,6 +13,7 @@ import { AgentHostV1Protocol } from "./http/v1-protocol.js";
 import { createLargeDemoSnapshot, demoAdapterHealth } from "./testing/fixtures.js";
 import { MockAgentHostTransport } from "./testing/mock-transport.js";
 import { MockRepositoryContextSource, MockSourceControlClient } from "./testing/repositories/mock-clients.js";
+import { AgentHostRepositoryContextSource } from "./repositories/agent-host-context-source.js";
 import { GitHubRestClient } from "./repositories/github/github-rest-client.js";
 import "./styles.css";
 
@@ -142,11 +143,12 @@ const productionConnector: ClientConnector = {
         return token ? { scheme: "Bearer", token } : undefined;
       },
     });
+    const protocol = new AgentHostV1Protocol();
     const client = new DefaultAgentHostClient(
-      new HttpAgentHostTransport(channel, new AgentHostV1Protocol()),
+      new HttpAgentHostTransport(channel, protocol),
       { supportedApiVersions: ["1"] },
     );
-    return { client, close() {} };
+    return { client, repositoryContext: new AgentHostRepositoryContextSource(channel, protocol), close() {} };
   },
 };
 

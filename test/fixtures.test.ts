@@ -51,14 +51,15 @@ describe("sanitized fixtures", () => {
     await expect(transport.detail(demoAgents[1]!.id)).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("reports aggregate facets for the active filter scope", async () => {
+  it("reports opposite-facet counts instead of page-local approximations", async () => {
     const transport = new MockAgentHostTransport();
     transport.currentSnapshot = createLargeDemoSnapshot();
 
     const snapshot = await transport.snapshot({ filter: { statuses: ["blocked"] } });
 
     expect(snapshot.total).toBeGreaterThan(0);
-    expect(snapshot.facets?.byStatus).toEqual({ blocked: snapshot.total });
+    expect(snapshot.facets?.byStatus.blocked).toBe(snapshot.total);
+    expect(snapshot.facets?.byStatus.working).toBeGreaterThan(0);
     expect(Object.values(snapshot.facets?.byProvider ?? {}).reduce((sum, count) => sum + count, 0)).toBe(snapshot.total);
   });
 

@@ -7,6 +7,7 @@ import type {
   AgentEvent,
   AgentPageRequest,
   AgentSnapshot,
+  AgentStatus,
   ApiInfo,
 } from "../domain.js";
 import { AgentHostError } from "../errors.js";
@@ -35,17 +36,19 @@ export class MockAgentHostTransport implements AgentHostTransport {
     const snapshot = this.snapshots.shift() ?? this.currentSnapshot;
     this.currentSnapshot = snapshot;
     const normalizedText = request.filter?.text?.trim().toLocaleLowerCase();
-    const agents = snapshot.agents
-      .filter((agent) => !request.filter?.providers || request.filter.providers.includes(agent.provider))
-      .filter((agent) => !request.filter?.statuses || request.filter.statuses.includes(agent.status))
-      .filter((agent) => !request.filter?.cwd || agent.cwd?.includes(request.filter.cwd))
-      .filter(
-        (agent) =>
-          !normalizedText ||
-          [agent.name, agent.provider, agent.cwd, agent.project]
-            .filter((value): value is string => value !== undefined)
-            .some((value) => value.toLocaleLowerCase().includes(normalizedText)),
-      );
+    const matchesText = (agent: AgentSnapshot["agents"][number]) =>
+      !normalizedText
+      || [agent.name, agent.provider, agent.cwd, agent.project?.name]
+        .filter((value): value is string => value !== undefined)
+        .some((value) => value.toLocaleLowerCase().includes(normalizedText));
+    const matchesProvider = (agent: AgentSnapshot["agents"][number]) =>
+      !request.filter?.providers || request.filter.providers.includes(agent.provider);
+    const matchesStatus = (agent: AgentSnapshot["agents"][number]) =>
+      !request.filter?.statuses || request.filter.statuses.includes(agent.status);
+    const matchesCwd = (agent: AgentSnapshot["agents"][number]) =>
+      !request.filter?.cwd || agent.cwd?.includes(request.filter.cwd);
+    const scoped = snapshot.agents.filter((agent) => matchesText(agent) && matchesCwd(agent));
+    const agents = scoped.filter((agent) => matchesProvider(agent) && matchesStatus(agent));
     if (request.sort) {
       const { field, direction } = request.sort;
       const attentionPriority = { blocked: 0, error: 1, working: 2, idle: 3, done: 4, unknown: 5 } as const;
@@ -53,7 +56,9 @@ export class MockAgentHostTransport implements AgentHostTransport {
         const compared =
           field === "status"
             ? attentionPriority[left.status] - attentionPriority[right.status]
-            : String(left[field] ?? "").localeCompare(String(right[field] ?? ""));
+            : field === "lastActivityAt"
+              ? String(left.lastActivityAt ?? "").localeCompare(String(right.lastActivityAt ?? ""))
+              : String(left[field] ?? "").localeCompare(String(right[field] ?? ""));
         return direction === "asc" ? compared : -compared;
       });
     }
@@ -61,17 +66,16 @@ export class MockAgentHostTransport implements AgentHostTransport {
     const limit = request.limit ?? 50;
     const page = agents.slice(offset, offset + limit);
     const nextOffset = offset + page.length;
-    const byStatus: Record<string, number> = {};
+    const byStatus: Partial<Record<AgentStatus, number>> = {};
     const byProvider: Record<string, number> = {};
-    for (const agent of agents) {
-      byStatus[agent.status] = (byStatus[agent.status] ?? 0) + 1;
-      byProvider[agent.provider] = (byProvider[agent.provider] ?? 0) + 1;
-    }
+    for (const agent of scoped.filter(matchesProvider)) byStatus[agent.status] = (byStatus[agent.status] ?? 0) + 1;
+    for (const agent of scoped.filter(matchesStatus)) byProvider[agent.provider] = (byProvider[agent.provider] ?? 0) + 1;
     return {
       agents: page,
       revision: snapshot.revision,
       total: agents.length,
-      facets: { byStatus, byProvider },
+      facets: { revision: snapshot.revision, byStatus, byProvider },
+      sort: request.sort ?? { field: "status", direction: "asc" },
       ...(nextOffset < agents.length ? { nextCursor: String(nextOffset) } : {}),
     };
   }
@@ -89,7 +93,22 @@ export class MockAgentHostTransport implements AgentHostTransport {
         recordedApprovals.length > 0
           ? recordedApprovals
           : summary.status === "blocked" && summary.capabilities.approve
-          ? [
+          ? summary.id === "demo:agent-0008"
+            ? [
+                {
+                  id: `approval-${summary.id}`,
+                  kind: "file",
+                  summary: "File change request",
+                  actionable: true,
+                  files: [
+                    { path: "src/agent.js", kind: "update" },
+                    { path: "test/agent.test.js", kind: "add" },
+                  ],
+                  fileCount: 2,
+                  truncated: false,
+                },
+              ]
+            : [
               {
                 id: `approval-${summary.id}`,
                 kind: "command",
