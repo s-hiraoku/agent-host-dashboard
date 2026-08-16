@@ -100,7 +100,7 @@ export interface AgentSnapshot {
   readonly total?: number;
   readonly sort?: AgentSort;
   readonly facets?: {
-    readonly revision?: number;
+    readonly revision?: number | string;
     readonly byStatus: Readonly<Partial<Record<AgentStatus, number>>>;
     readonly byProvider: Readonly<Record<string, number>>;
   };

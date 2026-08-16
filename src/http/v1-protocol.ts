@@ -90,6 +90,13 @@ function nonNegativeInteger(value: unknown, label: string): number {
   return result;
 }
 
+function opaqueRevision(value: unknown, label: string): number | string {
+  if (typeof value === "number") return nonNegativeInteger(value, label);
+  const text = optionalString(value);
+  if (!text || text.length > 200 || controlOrBidi.test(text)) invalid(label);
+  return text;
+}
+
 function assertVersion(value: JsonRecord): void {
   const version = string(value.apiVersion, "API version");
   if (version !== API_VERSION) {
@@ -251,8 +258,8 @@ function snapshotSort(page: JsonRecord): AgentSort | undefined {
 function snapshotFacets(value: unknown, revision: number): AgentSnapshot["facets"] | undefined {
   if (value === undefined) return undefined;
   const input = record(value, "snapshot facets");
-  const facetRevision = nonNegativeInteger(input.revision, "facet revision");
-  if (facetRevision !== revision) {
+  const facetRevision = opaqueRevision(input.revision, "facet revision");
+  if (typeof facetRevision === "number" && facetRevision !== revision) {
     throw new AgentHostError("revision_gap", "Facet revision does not match the snapshot revision.", {
       retryable: true,
       details: { expected: revision, received: facetRevision },

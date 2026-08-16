@@ -294,6 +294,25 @@ describe("AgentHostV1Protocol", () => {
     await expect(new AgentHostV1Protocol().snapshot(channel, {})).rejects.toMatchObject({ code: "revision_gap" });
   });
 
+  it("decodes opaque raw-view facet revisions without comparing them to the snapshot number", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agents: [agent],
+      page: { limit: 200, total: 1, sort: "attention", direction: "asc" },
+      facets: {
+        revision: "raw:0:0",
+        providers: [{ value: "demo", count: 1 }],
+        statuses: [{ value: "blocked", count: 1 }],
+      },
+    }];
+    await expect(new AgentHostV1Protocol().snapshot(channel, { limit: 200, filter: { view: "raw" } })).resolves.toMatchObject({
+      revision: 7,
+      facets: { revision: "raw:0:0", byProvider: { demo: 1 }, byStatus: { blocked: 1 } },
+    });
+  });
+
   it("decodes repository associations fail-closed and ignores repository identity in SSE invalidations", async () => {
     const protocol = new AgentHostV1Protocol();
     const channel = new RecordingChannel();
