@@ -52,7 +52,13 @@ describe("AgentHostV1Protocol", () => {
     expect(snapshot).toMatchObject({ revision: 7, total: 1, nextCursor: "next-page" });
     expect(snapshot).not.toHaveProperty("facets");
     expect(snapshot.agents[0]).toMatchObject({ id: agent.id, capabilities: { read: true, approve: true, reject: true } });
-    await expect(protocol.snapshot(channel, { sort: { field: "name", direction: "asc" } })).rejects.toMatchObject({ code: "unsupported" });
+    const named = new RecordingChannel();
+    named.responses = [{ apiVersion: "1", revision: 7, agents: [agent], page: { limit: 50, total: 1, sort: "name", direction: "asc" }, facets: { revision: 7, providers: [{ value: "demo", count: 1 }], statuses: [{ value: "blocked", count: 1 }] } }];
+    await expect(protocol.snapshot(named, { sort: { field: "name", direction: "asc" } })).resolves.toMatchObject({
+      sort: { field: "name", direction: "asc" },
+      facets: { revision: 7, byProvider: { demo: 1 }, byStatus: { blocked: 1 } },
+    });
+    expect(named.requests[0]?.path).toContain("sort=name");
   });
 
   it("decodes detail approvals and adapter health without provider-native branching", async () => {
@@ -175,6 +181,236 @@ describe("AgentHostV1Protocol", () => {
     await expect(protocol.events(empty, { afterRevision: 7 })[Symbol.asyncIterator]().next()).rejects.toMatchObject({
       code: "connection_failed",
       retryable: true,
+    });
+  });
+
+  it("decodes local project identity and fail-closed file-change context", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agent: {
+        ...agent,
+        project: { id: "local:ZdgNLEiz0juJ-3ZE-7A0pA", name: "project", scope: "local" },
+        pendingApprovals: [{
+          approvalId: "file-1",
+          method: "item/fileChange/requestApproval",
+          actionable: true,
+          context: {
+            kind: "file-change",
+            fileCount: 2,
+            truncated: false,
+            files: [
+              { path: "src/agent.js", kind: "update" },
+              { path: "test/agent.test.js", kind: "add" },
+            ],
+          },
+        }],
+      },
+    }];
+    const detail = await new AgentHostV1Protocol().detail(channel, agent.id);
+    expect(detail.project).toEqual({ id: "local:ZdgNLEiz0juJ-3ZE-7A0pA", name: "project", scope: "local" });
+    expect(detail.pendingApprovals[0]).toMatchObject({
+      id: "file-1",
+      kind: "file",
+      actionable: true,
+      truncated: false,
+      fileCount: 2,
+      files: [
+        { path: "src/agent.js", kind: "update" },
+        { path: "test/agent.test.js", kind: "add" },
+      ],
+    });
+  });
+
+  it("keeps unsafe or non-actionable file approvals display-only", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agent: {
+        ...agent,
+        pendingApprovals: [
+          {
+            approvalId: "unsafe",
+            method: "item/fileChange/requestApproval",
+            actionable: true,
+            context: { kind: "file-change", files: [{ path: "../etc/passwd", kind: "update" }] },
+          },
+          {
+            approvalId: "disabled",
+            method: "item/fileChange/requestApproval",
+            actionable: false,
+            context: { kind: "file-change", fileCount: 1, truncated: false, files: [{ path: "src/safe.js", kind: "update" }] },
+          },
+        ],
+      },
+    }];
+    const detail = await new AgentHostV1Protocol().detail(channel, agent.id);
+    expect(detail.pendingApprovals[0]).toMatchObject({ id: "unsafe", kind: "other", actionable: false });
+    expect(detail.pendingApprovals[1]).toMatchObject({ id: "disabled", kind: "file", actionable: false, files: [{ path: "src/safe.js", kind: "update" }] });
+  });
+
+  it("marks oversize file-change context as truncated without inventing missing paths", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agent: {
+        ...agent,
+        pendingApprovals: [{
+          approvalId: "truncated",
+          method: "item/fileChange/requestApproval",
+          actionable: true,
+          context: {
+            kind: "file-change",
+            fileCount: 21,
+            truncated: false,
+            files: Array.from({ length: 21 }, (_, index) => ({ path: `safe-${index}.js`, kind: "update" })),
+          },
+        }],
+      },
+    }];
+    const detail = await new AgentHostV1Protocol().detail(channel, agent.id);
+    expect(detail.pendingApprovals[0]).toMatchObject({
+      id: "truncated",
+      kind: "file",
+      actionable: true,
+      truncated: true,
+      fileCount: 21,
+    });
+    expect(detail.pendingApprovals[0]?.files).toHaveLength(20);
+  });
+
+  it("resyncs when facet revision does not match the snapshot", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agents: [agent],
+      page: { limit: 50, total: 1, sort: "attention", direction: "asc" },
+      facets: { revision: 8, providers: [], statuses: [] },
+    }];
+    await expect(new AgentHostV1Protocol().snapshot(channel, {})).rejects.toMatchObject({ code: "revision_gap" });
+  });
+
+  it("decodes opaque raw-view facet revisions without comparing them to the snapshot number", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agents: [agent],
+      page: { limit: 200, total: 1, sort: "attention", direction: "asc" },
+      facets: {
+        revision: "raw:0:0",
+        providers: [{ value: "demo", count: 1 }],
+        statuses: [{ value: "blocked", count: 1 }],
+      },
+    }];
+    await expect(new AgentHostV1Protocol().snapshot(channel, { limit: 200, filter: { view: "raw" } })).resolves.toMatchObject({
+      revision: 7,
+      facets: { revision: "raw:0:0", byProvider: { demo: 1 }, byStatus: { blocked: 1 } },
+    });
+  });
+
+  it("decodes repository associations fail-closed and ignores repository identity in SSE invalidations", async () => {
+    const protocol = new AgentHostV1Protocol();
+    const channel = new RecordingChannel();
+    channel.responses = [
+      {
+        apiVersion: "1",
+        capabilities: {
+          repositoryAssociations: {
+            status: "supported",
+            versions: ["1"],
+            maxItems: 100,
+            events: ["agent.repository-associations.changed"],
+            replay: false,
+          },
+        },
+      },
+      {
+        apiVersion: "1",
+        associationVersion: "1",
+        revision: 4,
+        agentId: "demo:working",
+        state: "ready",
+        freshness: "current",
+        complete: true,
+        associations: [{
+          kind: "confirmed",
+          repository: {
+            forge: "github",
+            host: "forge.example",
+            coordinates: { kind: "named", owner: "example-labs", name: "orbit" },
+            webUrl: "https://forge.example/example-labs/orbit",
+          },
+          provenance: { source: "adapter-authoritative", confidence: "high" },
+          checkout: { branch: "feature/repository-context", worktree: { id: "orbit-primary" } },
+          pullRequest: { number: 42, webUrl: "https://forge.example/example-labs/orbit/pull/42" },
+        }],
+      },
+      {
+        apiVersion: "1",
+        associationVersion: "1",
+        revision: 4,
+        agentId: "demo:error",
+        state: "unavailable",
+        error: { code: "repository_associations_unavailable", retryable: true },
+      },
+      {
+        apiVersion: "1",
+        associationVersion: "1",
+        revision: 4,
+        agentId: "demo:working",
+        state: "ready",
+        freshness: "current",
+        complete: true,
+        associations: [{
+          kind: "confirmed",
+          repository: {
+            forge: "gitlab",
+            host: "forge.example",
+            coordinates: { kind: "named", owner: "example-labs", name: "orbit" },
+            webUrl: "https://forge.example/example-labs/orbit",
+          },
+          provenance: { source: "adapter-authoritative", confidence: "high" },
+        }],
+      },
+    ];
+
+    await expect(protocol.repositoryCapability(channel)).resolves.toMatchObject({ versions: ["1"], maxItems: 100, replay: false });
+    await expect(protocol.repositoryContext(channel, "demo:working")).resolves.toMatchObject({
+      state: "ready",
+      freshness: "current",
+      complete: true,
+      associations: [{
+        kind: "confirmed",
+        agentId: "demo:working",
+        repository: { service: "github", host: "forge.example", owner: "example-labs", name: "orbit" },
+        checkout: { branch: "feature/repository-context", worktree: "orbit-primary" },
+        pullRequest: { number: 42 },
+      }],
+    });
+    await expect(protocol.repositoryContext(channel, "demo:error")).resolves.toEqual({
+      state: "unavailable",
+      reason: "repository_associations_unavailable",
+      retryable: true,
+    });
+    await expect(protocol.repositoryContext(channel, "demo:working")).resolves.toMatchObject({
+      state: "ready",
+      complete: false,
+      associations: [],
+    });
+    expect(channel.requests[1]?.path).toBe("/v1/agents/demo%3Aworking/repository-associations?version=1");
+
+    const events = new RecordingChannel();
+    events.frames = [
+      frame("ready", { revision: 7, sequence: 1 }),
+      frame("agent.repository-associations.changed", { sequence: 2, snapshotRevision: 7, agentId: "demo:idle" }),
+    ];
+    await expect(protocol.events(events, { afterRevision: 7 })[Symbol.asyncIterator]().next()).resolves.toMatchObject({
+      value: { type: "agent.repository-associations.changed", agentId: "demo:idle", revision: 7, sequence: 2 },
     });
   });
 });

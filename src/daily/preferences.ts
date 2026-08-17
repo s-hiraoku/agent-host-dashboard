@@ -1,4 +1,5 @@
 import type { AgentSort, AgentStatus } from "../domain.js";
+import { localProjectIdPattern } from "../domain.js";
 import { normalizeAgentHostBaseUrl } from "../http/fetch-channel.js";
 
 export const preferenceStorageKey = "agent-host-dashboard.preferences";
@@ -20,7 +21,7 @@ export interface SavedView extends PersistedQuery {
 }
 
 export interface DashboardPreferences {
-  readonly version: 3;
+  readonly version: 4;
   readonly endpoint: string;
   readonly density: Density;
   readonly columns: readonly AgentColumn[];
@@ -34,6 +35,7 @@ export interface NotificationPreferences {
   readonly blocked: boolean;
   readonly completed: boolean;
   readonly error: boolean;
+  readonly suppressedProjectIds: readonly string[];
 }
 
 export interface PreferenceStore {
@@ -48,13 +50,13 @@ const sortDirections = new Set<AgentSort["direction"]>(["asc", "desc"]);
 const defaultSort: AgentSort = { field: "status", direction: "asc" };
 
 export const defaultPreferences: DashboardPreferences = {
-  version: 3,
+  version: 4,
   endpoint: "http://127.0.0.1:4777/",
   density: "comfortable",
   columns: [...agentColumns],
   query: { status: "all", provider: "", sort: defaultSort },
   savedViews: [],
-  notifications: { enabled: false, blocked: true, completed: true, error: true },
+  notifications: { enabled: false, blocked: true, completed: true, error: true, suppressedProjectIds: [] },
 };
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -111,9 +113,18 @@ function safeSavedViews(value: unknown): readonly SavedView[] {
   return views;
 }
 
+function safeProjectIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  for (const candidate of value.slice(0, 50)) {
+    if (typeof candidate === "string" && localProjectIdPattern().test(candidate)) ids.add(candidate);
+  }
+  return [...ids];
+}
+
 export function sanitizePreferences(value: unknown): DashboardPreferences {
   const input = record(value);
-  if (!input || (input.version !== 1 && input.version !== 2 && input.version !== 3)) return defaultPreferences;
+  if (!input || (input.version !== 1 && input.version !== 2 && input.version !== 3 && input.version !== 4)) return defaultPreferences;
   const columns = Array.isArray(input.columns)
     ? [...new Set(input.columns.filter((column): column is AgentColumn =>
       typeof column === "string" && agentColumns.includes(column as AgentColumn),
@@ -122,21 +133,23 @@ export function sanitizePreferences(value: unknown): DashboardPreferences {
   const density = typeof input.density === "string" && densities.includes(input.density as Density)
     ? input.density as Density
     : defaultPreferences.density;
+  const notifications = input.version === 3 || input.version === 4
+    ? {
+        enabled: record(input.notifications)?.enabled === true,
+        blocked: record(input.notifications)?.blocked !== false,
+        completed: record(input.notifications)?.completed !== false,
+        error: record(input.notifications)?.error !== false,
+        suppressedProjectIds: input.version === 4 ? safeProjectIds(record(input.notifications)?.suppressedProjectIds) : [],
+      }
+    : defaultPreferences.notifications;
   return {
-    version: 3,
+    version: 4,
     endpoint: safeEndpoint(input.endpoint),
     density,
     columns,
     query: safeQuery(input.query),
-    savedViews: input.version === 2 || input.version === 3 ? safeSavedViews(input.savedViews) : [],
-    notifications: input.version === 3
-      ? {
-          enabled: record(input.notifications)?.enabled === true,
-          blocked: record(input.notifications)?.blocked !== false,
-          completed: record(input.notifications)?.completed !== false,
-          error: record(input.notifications)?.error !== false,
-        }
-      : defaultPreferences.notifications,
+    savedViews: input.version === 2 || input.version === 3 || input.version === 4 ? safeSavedViews(input.savedViews) : [],
+    notifications,
   };
 }
 

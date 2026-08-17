@@ -226,7 +226,7 @@ export function DailyDriverShell({ connector, preferenceStore, environmentNotice
   const copy = failure ? failureCopy[failure.kind] : undefined;
   return (
     <>
-      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} {...(repositoryContext ? { repositoryContext } : {})} {...(activeSourceControl ? { sourceControl: activeSourceControl } : {})} dailyDriver={{
+      {lease && activeNotificationCoordinator && notificationNamespace && <div hidden={showOnboarding}><App key={workspaceGeneration} client={lease.client} showDemoControls={false} {...(lease.repositoryContext ?? repositoryContext ? { repositoryContext: lease.repositoryContext ?? repositoryContext } : {})} {...(activeSourceControl ? { sourceControl: activeSourceControl } : {})} dailyDriver={{
         preferences,
         onPreferencesChange: updatePreferences,
         onReconnect: resetConnection,

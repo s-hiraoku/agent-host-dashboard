@@ -9,7 +9,8 @@ export interface DashboardNotification {
   readonly agentId: string;
   readonly agentName: string;
   readonly provider: string;
-  readonly project?: string;
+  readonly projectId?: string;
+  readonly projectName?: string;
 }
 
 export interface NotificationGateway {
@@ -147,7 +148,7 @@ export function notificationFromEvent(event: AgentEvent): DashboardNotification 
     agentId: event.agent.id,
     agentName: event.agent.name,
     provider: event.agent.provider,
-    ...(event.agent.project ? { project: event.agent.project } : {}),
+    ...(event.agent.project ? { projectId: event.agent.project.id, projectName: event.agent.project.name } : {}),
   };
 }
 
@@ -160,5 +161,5 @@ export function shouldNotify(
   return preferences.enabled
     && preferences[notification.kind]
     && !mutedProviders.has(notification.provider)
-    && (!notification.project || !mutedProjects.has(notification.project));
+    && (!notification.projectId || !mutedProjects.has(notification.projectId));
 }

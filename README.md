@@ -24,7 +24,9 @@ Repository and GitHub Issue/PR work uses two additional framework-independent
 ports: `RepositoryContextSource` for agent-to-repository association and
 `SourceControlClient` for read-only forge queries. The separation prevents the
 dashboard from inventing fields that are not present in the confirmed agent-host
-API. See [docs/architecture/repository-context.md](docs/architecture/repository-context.md).
+API. Production mode uses `AgentHostRepositoryContextSource` against the public
+capability and per-agent association endpoints. See
+[docs/architecture/repository-context.md](docs/architecture/repository-context.md).
 The read-only GitHub REST adapter and its authentication/cache limits are
 documented in [docs/github-transport.md](docs/github-transport.md).
 
@@ -32,16 +34,18 @@ documented in [docs/github-transport.md](docs/github-transport.md).
 
 Agent-host API v1 now publishes version discovery, bounded snapshots, adapter
 health, structured errors, bearer authentication, idempotent actions, sequenced
-SSE events, and sanitized client-conformance fixtures. The dashboard production
-codec implements those confirmed v1 fields. API v1 still has fixed server
-ordering and no global provider/status facets, so the UI disables alternate sorts
-and renders unavailable global counts as dashes instead of presenting page-local
-approximations as operational truth.
+SSE events, allowlisted global sort, revision-consistent facets, local project
+ids, sanitized file-change approval context, versioned repository associations,
+and sanitized client-conformance fixtures. The dashboard production codec
+implements those confirmed v1 fields.
+Older hosts that omit the additive fields remain usable: sort stays disabled and
+global counts render as dashes instead of page-local approximations.
 
 The client therefore ships:
 
 - stable provider-neutral domain and `AgentHostClient` interfaces;
-- an injectable `AgentHostWireProtocol` boundary for the v1 codec;
+- an injectable `AgentHostWireProtocol` boundary for the v1 codec, including
+  additive sort, facet, project, file-approval, and repository-association fields;
 - a fetch HTTP/SSE channel with transient authentication injection;
 - deterministic sanitized fixtures and a semantic mock transport;
 - connection lifecycle, reconnect/backoff, revision-gap detection, and snapshot resync behavior.
@@ -49,8 +53,9 @@ The client therefore ships:
 Supported API versions are explicitly supplied when constructing
 `DefaultAgentHostClient`; an unknown version fails closed. The v1 codec keeps SSE
 sequence and snapshot revision separate and performs mandatory snapshot resync
-after ready mismatch, sequence gap, clean EOF, or network disconnect. Unsupported
-sort/facet behavior remains unavailable rather than being guessed. See
+after ready mismatch, sequence gap, clean EOF, or network disconnect. Unsupported sort/facet behavior remains unavailable rather than being guessed when
+those fields are absent. Repository association remains a separate backend
+contract. See
 [docs/agent-host-contract-blockers.md](docs/agent-host-contract-blockers.md).
 
 ## Authentication and local connection

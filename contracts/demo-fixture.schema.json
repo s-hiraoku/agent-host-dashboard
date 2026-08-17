@@ -54,7 +54,16 @@
         "capabilities": { "$ref": "#/$defs/capabilities" },
         "cwd": { "type": "string" },
         "lastActivityAt": { "type": "string", "format": "date-time" },
-        "project": { "type": "string" },
+        "project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "scope"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^local:[A-Za-z0-9_-]{22}$" },
+            "name": { "type": "string", "minLength": 1 },
+            "scope": { "const": "local" }
+          }
+        },
         "provenance": { "$ref": "#/$defs/provenance" }
       }
     },
@@ -64,11 +73,26 @@
       "required": ["id", "kind", "summary"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "kind": { "enum": ["command", "file"] },
+        "kind": { "enum": ["command", "file", "other"] },
         "summary": { "type": "string", "minLength": 1 },
         "reason": { "type": "string" },
         "command": { "type": "string" },
-        "path": { "type": "string" }
+        "path": { "type": "string" },
+        "actionable": { "type": "boolean" },
+        "fileCount": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "kind"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "kind": { "enum": ["add", "delete", "update"] }
+            }
+          }
+        }
       }
     },
     "detail": {
@@ -83,7 +107,16 @@
         "capabilities": { "$ref": "#/$defs/capabilities" },
         "cwd": { "type": "string" },
         "lastActivityAt": { "type": "string", "format": "date-time" },
-        "project": { "type": "string" },
+        "project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "scope"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^local:[A-Za-z0-9_-]{22}$" },
+            "name": { "type": "string", "minLength": 1 },
+            "scope": { "const": "local" }
+          }
+        },
         "provenance": { "$ref": "#/$defs/provenance" },
         "createdAt": { "type": "string", "format": "date-time" },
         "pendingApprovals": { "type": "array", "items": { "$ref": "#/$defs/approval" } },
@@ -104,12 +137,22 @@
           "additionalProperties": false,
           "required": ["byStatus", "byProvider"],
           "properties": {
+            "revision": { "type": "integer", "minimum": 0 },
             "byStatus": {
               "type": "object",
               "propertyNames": { "enum": ["unknown", "idle", "working", "blocked", "done", "error"] },
               "additionalProperties": { "type": "integer", "minimum": 0 }
             },
             "byProvider": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+          }
+        },
+        "sort": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "direction"],
+          "properties": {
+            "field": { "enum": ["name", "provider", "status", "lastActivityAt"] },
+            "direction": { "enum": ["asc", "desc"] }
           }
         }
       }

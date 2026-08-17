@@ -1,9 +1,11 @@
 import type { AgentHostClient } from "../client.js";
 import { AgentHostError, toAgentHostError } from "../errors.js";
+import type { RepositoryContextSource } from "../repositories/context-source.js";
 import type { SourceControlClient } from "../repositories/source-control.js";
 
 export interface ClientLease {
   readonly client: AgentHostClient;
+  readonly repositoryContext?: RepositoryContextSource;
   close(): void;
 }
 

@@ -26,13 +26,13 @@ describe("daily-driver preferences", () => {
     });
 
     expect(migrated).toEqual({
-      version: 3,
+      version: 4,
       endpoint: "http://localhost:8787/",
       density: "compact",
       columns: ["provider"],
       query: { status: "blocked", provider: "demo", sort: { field: "name", direction: "asc" } },
       savedViews: [],
-      notifications: { enabled: false, blocked: true, completed: true, error: true },
+      notifications: { enabled: false, blocked: true, completed: true, error: true, suppressedProjectIds: [] },
     });
     expect(JSON.stringify(migrated)).not.toMatch(/token|private search|private-session/i);
   });
@@ -42,12 +42,12 @@ describe("daily-driver preferences", () => {
       ...defaultPreferences,
       version: 2,
       notifications: { enabled: true, blocked: false, completed: false, error: false, token: "drop" },
-    })).toMatchObject({ version: 3, notifications: { enabled: false, blocked: true, completed: true, error: true } });
+    })).toMatchObject({ version: 4, notifications: { enabled: false, blocked: true, completed: true, error: true, suppressedProjectIds: [] } });
     expect(sanitizePreferences({
       ...defaultPreferences,
       version: 3,
       notifications: { enabled: true, blocked: false, completed: true, error: false, providerRules: ["private-id"] },
-    }).notifications).toEqual({ enabled: true, blocked: false, completed: true, error: false });
+    }).notifications).toEqual({ enabled: true, blocked: false, completed: true, error: false, suppressedProjectIds: [] });
   });
 
   it("fails closed for corrupt, future, and unsafe preference payloads", () => {
@@ -75,6 +75,18 @@ describe("daily-driver preferences", () => {
     expect(store.load()).toBe(defaultPreferences);
     storage.values.set(preferenceStorageKey, "{not-json");
     expect(store.load()).toBe(defaultPreferences);
+  });
+
+  it("persists only opaque local project ids", () => {
+    const sanitized = sanitizePreferences({
+      ...defaultPreferences,
+      notifications: {
+        ...defaultPreferences.notifications,
+        suppressedProjectIds: ["local:abcdefghijklmnopqrstuv", "/workspace/secret", "local:short"],
+      },
+    });
+    expect(sanitized.notifications.suppressedProjectIds).toEqual(["local:abcdefghijklmnopqrstuv"]);
+    expect(JSON.stringify(sanitized)).not.toMatch(/workspace|secret/);
   });
 
   it("bounds and sanitizes saved views", () => {

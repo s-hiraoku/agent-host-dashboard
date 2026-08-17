@@ -12,7 +12,8 @@ The development connector is a deterministic demo adapter for onboarding and
 recovery tests. A persistent simulation banner states that it never contacts the
 entered endpoint. It does not define agent-host paths or wire fields. Agent-host
 issues #2 and #4 now define the v1 wire and bearer-authentication contracts.
-Production builds use the v1 codec. Direct v1 connections accept the bearer
+Production builds use the v1 codec, including additive sort, facet, project, and
+file-approval fields when the host publishes them. Direct v1 connections accept the bearer
 token at connection time; a same-origin proxy may inject it without exposing it
 to the form. Development stays in labelled simulation mode unless
 `?connector=real` is present. Unsupported global sort/facets remain visibly
@@ -39,19 +40,20 @@ disconnected recovery state so an expired token cannot remain labelled active.
 
 ## Persisted preferences
 
-`LocalPreferenceStore` is the only localStorage adapter. Its version 3 payload
+`LocalPreferenceStore` is the only localStorage adapter. Its version 4 payload
 contains only the canonical endpoint, status/provider/sort predicates, density,
-selected columns, bounded saved-view names, and global notification-type toggles.
-It strictly projects known fields, migrates versions 1 and 2, rejects
+selected columns, bounded saved-view names, global notification-type toggles,
+and opaque local project ids used to suppress notifications. It strictly
+projects known fields, migrates versions 1 through 3, rejects
 future/corrupt/oversized data, and never
 persists free-text searches, agent IDs, cwd values, prompt drafts, commands,
 snapshots, raw JSON, or error bodies.
 
-Provider/project notification rules, recent agents, and sanitized action history
-remain session-only until the backend contract classifies stable public identifiers
-that are safe to retain. Provider/project choices accumulate from public facets,
-snapshots, and events observed in the current session; complete project enumeration
-remains a backend contract blocker.
+Provider notification rules, recent agents, and sanitized action history
+remain session-only. Local project mutes may persist because the host classifies
+those ids as stable public identifiers. They never include cwd or directory
+paths. Provider/project choices accumulate from public facets,
+snapshots, and events observed in the current session.
 
 ## Operational memory and notifications
 

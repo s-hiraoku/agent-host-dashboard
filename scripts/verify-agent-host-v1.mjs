@@ -1,4 +1,5 @@
 import {
+  AgentHostRepositoryContextSource,
   AgentHostV1Protocol,
   DefaultAgentHostClient,
   FetchHttpChannel,
@@ -64,6 +65,24 @@ await Promise.race([
   streamReady,
   new Promise((_, reject) => setTimeout(() => reject(new Error("SSE ready handshake timed out")), 2_000)),
 ]);
+
+const repositorySource = new AgentHostRepositoryContextSource(delegate, new AgentHostV1Protocol());
+const workingContext = await repositorySource.forAgent("demo:working");
+if (workingContext.state !== "ready" || workingContext.associations.length !== 1) {
+  throw new Error("demo working agent did not expose one github repository association");
+}
+if (workingContext.associations[0]?.repository.owner !== "example-labs" || workingContext.associations[0]?.repository.name !== "orbit") {
+  throw new Error("demo repository association did not map forge-neutral github coordinates");
+}
+const idleBefore = await repositorySource.forAgent("demo:idle");
+if (idleBefore.state !== "ready" || idleBefore.associations.length !== 0) {
+  throw new Error("demo idle agent must start with zero repository associations");
+}
+const unsupportedContext = await repositorySource.forAgent("demo:unknown");
+if (unsupportedContext.state !== "unsupported") {
+  throw new Error("demo unknown agent must remain per-agent unsupported");
+}
+
 const prompt = await client.action(idle, { kind: "prompt", text: "conformance prompt" });
 const observed = await Promise.race([
   nextEvent,
@@ -76,6 +95,11 @@ await client.action(blocked, { kind: "approve", approvalId: blocked.pendingAppro
 await delegate.request({ path: "/v1/refresh", method: "POST" });
 const updated = await client.snapshot({ limit: 200, filter: { view: "raw" } });
 if (updated.revision <= snapshot.revision) throw new Error("demo action transitions did not advance the snapshot revision");
+
+const idleAfter = await repositorySource.forAgent("demo:idle");
+if (idleAfter.state !== "ready" || idleAfter.associations.length !== 1) {
+  throw new Error("demo idle agent did not refetch the changed repository association");
+}
 
 streamController.abort();
 await iterator.return?.().catch(() => {});
@@ -103,4 +127,5 @@ console.log(JSON.stringify({
   eventSequence: observed.value.sequence,
   revision: updated.revision,
   unauthorized,
+  repositoryAssociations: workingContext.associations.length,
 }));

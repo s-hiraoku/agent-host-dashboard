@@ -83,7 +83,7 @@ function updateVisibleFacets(
     byStatus[next.status] = (byStatus[next.status] ?? 0) + 1;
     byProvider[next.provider] = (byProvider[next.provider] ?? 0) + 1;
   }
-  return { byStatus, byProvider };
+  return { byStatus, byProvider, ...(snapshot.facets.revision === undefined ? {} : { revision: snapshot.facets.revision }) };
 }
 
 function invalidateFacets(snapshot: AgentSnapshot, event: AgentEvent, totalDelta = 0): AgentSnapshot {

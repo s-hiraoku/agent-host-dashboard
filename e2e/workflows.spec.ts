@@ -159,6 +159,35 @@ test("renders authorization, incompatibility, adapter, and error recovery states
   await expect(page.locator(".agent-row").first()).toContainText("error");
 });
 
+test("sorts the complete filtered snapshot without moving selection", async ({ page }) => {
+  await page.goto("/?fixture=live");
+  const firstRow = page.locator(".agent-row").first();
+  const name = (await firstRow.locator("strong").textContent())?.trim();
+  await firstRow.click();
+  await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
+  const sort = page.getByLabel("Sort");
+  await expect(sort).toBeEnabled();
+  await sort.selectOption("lastActivityAt:desc");
+  await expect(sort).toHaveValue("lastActivityAt:desc");
+  await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
+});
+
+test("reviews sanitized file-change context before an explicit approval", async ({ page }) => {
+  await page.goto("/?fixture=live");
+  await page.getByLabel("Status").selectOption("blocked");
+  await page.getByRole("button", { name: /Sanitized agent 0008/ }).click();
+  await expect(page.locator(".approval-files").getByText("src/agent.js", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Approve" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("src/agent.js");
+  await expect(dialog).toContainText("test/agent.test.js");
+  await dialog.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Approve" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Approve request" }).click();
+  await expect(page.getByText(/approve completed/)).toBeVisible();
+});
+
 test("supports a keyboard-only search and selection workflow", async ({ page }) => {
   await page.goto("/?fixture=live");
   await page.keyboard.press("Tab");

@@ -9,8 +9,15 @@ import type {
   AgentSnapshot,
   ApiInfo,
 } from "../domain.js";
+import type { RepositoryContextResult } from "../repositories/domain.js";
 import type { AgentHostTransport, EventStreamOptions, RequestOptions } from "../transport.js";
 import type { HttpChannel } from "./types.js";
+
+export interface RepositoryAssociationCapability {
+  readonly versions: readonly string[];
+  readonly maxItems: number;
+  readonly replay: boolean;
+}
 
 /**
  * The only layer allowed to know agent-host endpoint paths and wire fields.
@@ -22,6 +29,8 @@ export interface AgentHostWireProtocol {
   snapshot(channel: HttpChannel, request: AgentPageRequest, options?: RequestOptions): Promise<AgentSnapshot>;
   detail(channel: HttpChannel, agentId: string, options?: RequestOptions): Promise<AgentDetail>;
   adapterHealth(channel: HttpChannel, options?: RequestOptions): Promise<readonly AdapterHealth[]>;
+  repositoryCapability(channel: HttpChannel, options?: RequestOptions): Promise<RepositoryAssociationCapability | undefined>;
+  repositoryContext(channel: HttpChannel, agentId: string, options?: RequestOptions): Promise<RepositoryContextResult>;
   action(
     channel: HttpChannel,
     target: ActionTarget,
@@ -51,6 +60,14 @@ export class HttpAgentHostTransport implements AgentHostTransport {
 
   adapterHealth(options?: RequestOptions) {
     return this.protocol.adapterHealth(this.channel, options);
+  }
+
+  repositoryCapability(options?: RequestOptions) {
+    return this.protocol.repositoryCapability(this.channel, options);
+  }
+
+  repositoryContext(agentId: string, options?: RequestOptions) {
+    return this.protocol.repositoryContext(this.channel, agentId, options);
   }
 
   action(target: ActionTarget, action: AgentAction, options?: RequestOptions) {
