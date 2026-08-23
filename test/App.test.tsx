@@ -260,7 +260,7 @@ describe("evaluation dashboard", () => {
     await user.click(next);
 
     expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Select an agent to inspect its public details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an agent from the list to see its status and repository.")).toBeInTheDocument();
   });
 
   it("does not present page-local sort or facet approximations as global capabilities", async () => {
@@ -422,6 +422,19 @@ describe("evaluation dashboard", () => {
     expect(read).toBeDisabled();
     releaseAction();
     await waitFor(() => expect(read).toBeEnabled());
+  });
+
+  it("offers Focus only when the host advertises the capability", async () => {
+    const { transport, user } = renderDashboard();
+    await user.selectOptions(screen.getByLabelText("Status"), "working");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0001/ }))[0]!);
+    const focus = await screen.findByRole("button", { name: "Focus" });
+    await user.click(focus);
+    await waitFor(() => expect(transport.actions[0]?.action).toEqual({ kind: "focus" }));
+
+    await user.selectOptions(screen.getByLabelText("Status"), "unknown");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0006/ }))[0]!);
+    expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument();
   });
 
   it("preserves filter, selection, and per-agent draft across live updates", async () => {
@@ -599,8 +612,8 @@ describe("evaluation dashboard", () => {
     await screen.findByRole("heading", { name: "Sanitized agent 0002" });
 
     releaseEvents();
-    expect(await screen.findByText("Select an agent to inspect its public details.")).toBeInTheDocument();
-    expect(screen.getByText("Select an agent to inspect available actions.")).toBeInTheDocument();
+    expect(await screen.findByText("Select an agent from the list to see its status and repository.")).toBeInTheDocument();
+    expect(screen.getByText("Select an agent to operate on it.")).toBeInTheDocument();
   });
 
   it("bounds off-page event bursts to one authoritative reload", async () => {
@@ -848,7 +861,7 @@ describe("evaluation dashboard", () => {
       savedViews,
     });
     await screen.findByText("50 shown of 1000");
-
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: "Save view" }));
 
     expect(await screen.findByText(/Saved view limit reached/)).toBeInTheDocument();

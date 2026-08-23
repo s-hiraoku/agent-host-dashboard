@@ -1,7 +1,7 @@
 export const agentStatuses = ["unknown", "idle", "working", "blocked", "done", "error"] as const;
 export type AgentStatus = (typeof agentStatuses)[number];
 
-export const agentActions = ["prompt", "read", "interrupt", "approve", "reject"] as const;
+export const agentActions = ["prompt", "read", "interrupt", "approve", "reject", "focus"] as const;
 export type AgentActionKind = (typeof agentActions)[number];
 
 export type AgentCapabilities = Readonly<Partial<Record<AgentActionKind, true>>>;
@@ -116,6 +116,7 @@ export type AgentAction =
   | { readonly kind: "prompt"; readonly text: string; readonly expectedRevision?: number }
   | { readonly kind: "read"; readonly expectedRevision?: number }
   | { readonly kind: "interrupt"; readonly expectedRevision?: number }
+  | { readonly kind: "focus"; readonly expectedRevision?: number }
   | { readonly kind: "approve"; readonly approvalId: string; readonly expectedRevision?: number }
   | { readonly kind: "reject"; readonly approvalId: string; readonly expectedRevision?: number };
 

@@ -116,7 +116,7 @@ export class FetchHttpChannel implements HttpChannel {
   constructor(options: FetchHttpChannelOptions = {}) {
     this.baseUrl = normalizeAgentHostBaseUrl(options.baseUrl ?? "/agent-host", options.allowRemoteHttps ?? false);
     this.authentication = options.authentication;
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   private async headers(
@@ -126,8 +126,9 @@ export class FetchHttpChannel implements HttpChannel {
     const headers = new Headers(input);
     const credential = await this.authentication?.(signal);
     if (credential) {
-      if (!credential.token.trim()) throw new AgentHostError("unauthorized", "The authentication token is empty.");
-      headers.set("authorization", `${credential.scheme} ${credential.token}`);
+      const token = credential.token.trim();
+      if (!token) throw new AgentHostError("unauthorized", "The authentication token is empty.");
+      headers.set("authorization", `${credential.scheme} ${token}`);
     }
     return headers;
   }
@@ -146,7 +147,8 @@ export class FetchHttpChannel implements HttpChannel {
       });
     } catch (error) {
       if (request.signal?.aborted) throw request.signal.reason;
-      throw new AgentHostError("connection_failed", "Could not reach agent-host.", { retryable: true, cause: error });
+      const detail = error instanceof Error && error.message ? ` ${error.message}` : "";
+      throw new AgentHostError("connection_failed", `Could not reach agent-host.${detail}`, { retryable: true, cause: error });
     }
 
     if (!response.ok) {

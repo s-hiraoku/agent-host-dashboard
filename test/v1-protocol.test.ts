@@ -9,7 +9,7 @@ const agent = {
   source: "demo-fixture",
   name: "Approval required",
   status: "blocked",
-  capabilities: { prompt: false, read: true, approve: true, reject: true, interrupt: false },
+  capabilities: { prompt: false, read: true, approve: true, reject: true, interrupt: false, focus: true },
   cwd: "/fixture/project",
   lastActivityAt: "2026-01-01T00:00:00.000Z",
   discoveredAt: "2026-01-01T00:00:00.000Z",
@@ -51,7 +51,7 @@ describe("AgentHostV1Protocol", () => {
     expect(channel.requests[0]?.path).toBe("/v1/agents?limit=50&provider=demo&status=blocked&cwd=%2Ffixture&q=approval&view=active");
     expect(snapshot).toMatchObject({ revision: 7, total: 1, nextCursor: "next-page" });
     expect(snapshot).not.toHaveProperty("facets");
-    expect(snapshot.agents[0]).toMatchObject({ id: agent.id, capabilities: { read: true, approve: true, reject: true } });
+    expect(snapshot.agents[0]).toMatchObject({ id: agent.id, capabilities: { read: true, approve: true, reject: true, focus: true } });
     const named = new RecordingChannel();
     named.responses = [{ apiVersion: "1", revision: 7, agents: [agent], page: { limit: 50, total: 1, sort: "name", direction: "asc" }, facets: { revision: 7, providers: [{ value: "demo", count: 1 }], statuses: [{ value: "blocked", count: 1 }] } }];
     await expect(protocol.snapshot(named, { sort: { field: "name", direction: "asc" } })).resolves.toMatchObject({
@@ -90,6 +90,13 @@ describe("AgentHostV1Protocol", () => {
       method: "POST",
       headers: { "idempotency-key": "action-request-0001" },
       body: { approvalId: "approval-1" },
+    });
+    channel.responses = [{ apiVersion: "1", result: { ok: true, agentId: agent.id, action: "focus" } }];
+    await expect(protocol.action(channel, { id: agent.id }, { kind: "focus" })).resolves.toEqual({ ok: true, actionId: "action-request-0001" });
+    expect(channel.requests[1]).toMatchObject({
+      path: "/v1/agents/demo%3Ablocked/focus",
+      method: "POST",
+      body: {},
     });
     await expect(protocol.action(channel, { id: agent.id }, { kind: "read", expectedRevision: 7 })).rejects.toMatchObject({ code: "unsupported" });
   });

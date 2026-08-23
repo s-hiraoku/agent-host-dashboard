@@ -23,7 +23,7 @@ export const demoAgents: readonly AgentDetail[] = [
     name: "Review orbital parser",
     provider: "demo-alpha",
     status: "working",
-    capabilities: { prompt: true, read: true, interrupt: true },
+    capabilities: { prompt: true, read: true, interrupt: true, focus: true },
     cwd: "/workspace/orbit",
     lastActivityAt: timestamp,
     project: demoProject("orbit"),

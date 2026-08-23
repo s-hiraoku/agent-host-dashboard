@@ -26,7 +26,8 @@ export default defineConfig(() => {
       proxy: {
         "/agent-host": {
           target,
-          changeOrigin: false,
+          // agent-host rejects Host ports that do not match its listen port.
+          changeOrigin: true,
           rewrite: (path) => path.replace(/^\/agent-host/, ""),
           configure(proxy) {
             proxy.on("proxyReq", (request) => {

@@ -35,6 +35,24 @@ describe("FetchHttpChannel", () => {
     expect(fetch.mock.calls[0]?.[0]).toBe("/agent-host/v1/example");
   });
 
+  it("does not detach the default fetch from its global receiver", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = function (this: unknown) {
+      if (this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    } as typeof fetch;
+    try {
+      await expect(new FetchHttpChannel().request({ path: "/v1/example" })).resolves.toMatchObject({ status: 200 });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("refuses insecure remote endpoints and URLs carrying secrets", () => {
     expect(() => new FetchHttpChannel({ baseUrl: "http://agents.example.test" })).toThrow(AgentHostError);
     expect(() => new FetchHttpChannel({ baseUrl: "http://127.0.0.1:4777?token=secret" })).toThrow(

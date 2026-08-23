@@ -19,6 +19,7 @@ describe("sanitized fixtures", () => {
       new Set(["unknown", "idle", "working", "blocked", "done", "error"]),
     );
     expect(demoAgents.some((agent) => agent.capabilities.approve && agent.capabilities.reject)).toBe(true);
+    expect(demoAgents.some((agent) => agent.capabilities.focus)).toBe(true);
     expect(demoAgents.some((agent) => Object.keys(agent.capabilities).length === 0)).toBe(true);
   });
 

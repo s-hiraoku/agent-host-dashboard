@@ -118,6 +118,7 @@ function capabilities(value: unknown): AgentCapabilities {
     ...(input.prompt === true ? { prompt: true } : {}),
     ...(input.read === true ? { read: true } : {}),
     ...(input.interrupt === true ? { interrupt: true } : {}),
+    ...(input.focus === true ? { focus: true } : {}),
     ...(input.approve === true ? { approve: true } : {}),
     ...(input.reject === true ? { reject: true } : {}),
   };
