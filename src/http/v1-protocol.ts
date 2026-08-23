@@ -18,6 +18,7 @@ import {
   type ApprovalFile,
   type ApprovalRequest,
   type FileChangeKind,
+  type WorkspaceCandidate,
 } from "../domain.js";
 import { AgentHostError, toAgentHostError } from "../errors.js";
 import type { EventStreamOptions, RequestOptions } from "../transport.js";
@@ -134,6 +135,19 @@ function project(value: unknown): AgentProject | undefined {
   return { id, name, scope: "local" };
 }
 
+function workspaceCandidate(value: unknown): WorkspaceCandidate | undefined {
+  const input = optionalRecord(value);
+  if (!input) return undefined;
+  const id = optionalString(input.id);
+  const name = optionalString(input.name);
+  const confidence = optionalString(input.confidence);
+  if (!id || !name || !confidence || !confidences.has(confidence)) return undefined;
+  if (id.length > 100 || name.length > 160 || !/^[A-Za-z0-9:._-]+$/u.test(id) || controlOrBidi.test(name)) {
+    return undefined;
+  }
+  return { id, name, confidence: confidence as WorkspaceCandidate["confidence"] };
+}
+
 function publicApprovalPath(value: unknown): string | undefined {
   if (typeof value !== "string" || !value || controlOrBidi.test(value)) return undefined;
   const portable = value.replaceAll("\\", "/");
@@ -177,6 +191,7 @@ function summary(value: unknown): AgentSummary {
   const cwd = optionalString(input.cwd);
   const lastActivityAt = optionalString(input.lastActivityAt);
   const associatedProject = project(input.project);
+  const candidate = workspaceCandidate(input.workspaceCandidate);
   return {
     id,
     name: optionalString(input.name) ?? id,
@@ -186,6 +201,7 @@ function summary(value: unknown): AgentSummary {
     ...(cwd ? { cwd } : {}),
     ...(lastActivityAt ? { lastActivityAt } : {}),
     ...(associatedProject ? { project: associatedProject } : {}),
+    ...(candidate ? { workspaceCandidate: candidate } : {}),
     provenance: {
       source,
       ...(confidence && confidences.has(confidence) ? { confidence: confidence as "low" | "medium" | "high" } : {}),

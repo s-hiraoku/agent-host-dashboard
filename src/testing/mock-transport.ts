@@ -38,7 +38,7 @@ export class MockAgentHostTransport implements AgentHostTransport {
     const normalizedText = request.filter?.text?.trim().toLocaleLowerCase();
     const matchesText = (agent: AgentSnapshot["agents"][number]) =>
       !normalizedText
-      || [agent.name, agent.provider, agent.cwd, agent.project?.name]
+      || [agent.name, agent.provider, agent.cwd, agent.project?.name, agent.workspaceCandidate?.name]
         .filter((value): value is string => value !== undefined)
         .some((value) => value.toLocaleLowerCase().includes(normalizedText));
     const matchesProvider = (agent: AgentSnapshot["agents"][number]) =>

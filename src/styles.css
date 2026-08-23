@@ -308,6 +308,7 @@ h3 { margin-bottom: 0; font-size: 1rem; }
 dt, .field-label { display: block; margin-bottom: 0.2rem; color: var(--muted); font-size: 0.75rem; font-weight: 600; }
 dd { margin: 0; overflow: hidden; color: var(--text); font-size: 0.875rem; text-overflow: ellipsis; white-space: nowrap; }
 .agent-facts .wide dd { white-space: normal; overflow-wrap: anywhere; }
+.workspace-hint { margin: 0 0.85rem 0.85rem; }
 .capability-row { display: grid; gap: 0.4rem; margin: 0 0.85rem 0.85rem; padding: 0.65rem 0.8rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-soft); }
 .capability-row > div { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .capability { padding: 0.28rem 0.5rem; border: 1px solid var(--line-strong); border-radius: var(--radius); color: #d5dee3; background: var(--surface-raised); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.75rem; }

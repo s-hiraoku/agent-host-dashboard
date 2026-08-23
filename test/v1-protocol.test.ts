@@ -61,6 +61,39 @@ describe("AgentHostV1Protocol", () => {
     expect(named.requests[0]?.path).toContain("sort=name");
   });
 
+  it("keeps additive workspace candidates and drops unsafe ones", async () => {
+    const channel = new RecordingChannel();
+    channel.responses = [{
+      apiVersion: "1",
+      revision: 7,
+      agents: [{
+        ...agent,
+        cwd: undefined,
+        project: undefined,
+        workspaceCandidate: {
+          id: "cursor-workspace:demo",
+          name: "Volumes-SSD-ghq-github-com-s-hiraoku-agent-host-dashboard",
+          confidence: "low",
+        },
+      }, {
+        ...agent,
+        id: "demo:unsafe",
+        workspaceCandidate: { id: "bad id", name: "ok", confidence: "low" },
+      }],
+      page: { limit: 50, total: 2 },
+    }];
+    const protocol = new AgentHostV1Protocol();
+
+    const snapshot = await protocol.snapshot(channel, { limit: 50 });
+
+    expect(snapshot.agents[0]?.workspaceCandidate).toEqual({
+      id: "cursor-workspace:demo",
+      name: "Volumes-SSD-ghq-github-com-s-hiraoku-agent-host-dashboard",
+      confidence: "low",
+    });
+    expect(snapshot.agents[1]).not.toHaveProperty("workspaceCandidate");
+  });
+
   it("decodes detail approvals and adapter health without provider-native branching", async () => {
     const channel = new RecordingChannel();
     channel.responses = [

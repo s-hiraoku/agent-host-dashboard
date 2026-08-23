@@ -36,7 +36,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
-import { canDecideApproval, projectDisplayName, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
+import { canDecideApproval, statusExplanation, statusLabel, workspaceLabel, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
 import { useDashboard, type DashboardActionRecord, type DashboardQuery } from "./dashboard/use-dashboard.js";
 import { requiresRepositoryAuthentication, useRepositoryOverview } from "./dashboard/use-repository-overview.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
@@ -65,10 +65,11 @@ const statusIcons: Record<AgentStatus, ReactNode> = {
 };
 
 function StatusBadge({ status }: { readonly status: AgentStatus }) {
+  const explanation = statusExplanation(status);
   return (
-    <span className={`status-badge status-${status}`}>
+    <span className={`status-badge status-${status}`} title={explanation}>
       {statusIcons[status]}
-      <span>{status}</span>
+      <span>{statusLabel(status)}</span>
     </span>
   );
 }
@@ -451,7 +452,7 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
           <h3 id="saved-views-heading">Saved views</h3>
           <p>Save the current dashboard status, provider, and sort. Applying a view restores those filters.</p>
         </div>
-        <p className="hint">Current: {currentQuery.status === "all" ? "all statuses" : currentQuery.status} · {currentQuery.provider || "all providers"} · {sortLabel(currentQuery.sort)}</p>
+        <p className="hint">Current: {currentQuery.status === "all" ? "all statuses" : statusLabel(currentQuery.status)} · {currentQuery.provider || "all providers"} · {sortLabel(currentQuery.sort)}</p>
         <div className="saved-view-row">
           <label htmlFor="saved-view"><span>Saved view</span><select id="saved-view" defaultValue="" onChange={(event) => { const view = controls.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) onApplyView(view); }}><option value="">Select a view</option>{controls.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
           <button type="button" onClick={onSaveView}>Save view</button>
@@ -719,7 +720,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       ...current,
       savedViews: [...current.savedViews, {
         id: `view-${Date.now()}-${sequence}`,
-        name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : model.query.status}`,
+        name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : statusLabel(model.query.status)}`,
         status: model.query.status,
         provider: model.query.provider,
         sort: model.query.sort,
@@ -795,7 +796,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
           <div className="filters">
             <label className="search-field"><span className="visually-hidden">Search agents</span><Search aria-hidden="true" /><input ref={searchRef} aria-keyshortcuts="/" value={model.query.text} onChange={(event) => model.setQuery(updateQuery(model.query, { text: event.target.value }))} placeholder="Search agents" /></label>
             <div className="filter-row">
-              <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{metric.status}</option>)}</select></label>
+              <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{statusLabel(metric.status)}</option>)}</select></label>
               <label><span>Provider</span><select value={model.query.provider} onChange={(event) => model.setQuery(updateQuery(model.query, { provider: event.target.value }))}><option value="">All</option>{providers.map(([provider]) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
             </div>
             <label className="sort-control"><span>Sort</span><select disabled={sortUnavailable} title={sortUnavailable ? "This host exposes fixed attention ordering." : undefined} value={`${model.query.sort.field}:${model.query.sort.direction}`} onChange={(event) => {
@@ -811,7 +812,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
               <li key={agent.id}>
                 <button type="button" className={`agent-row status-${agent.status} ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => { rememberAgent(agent); model.select(agent.id); }} aria-current={agent.id === model.selectedId ? "true" : undefined}>
                   <span className="agent-row-top"><strong>{agent.name}</strong><StatusBadge status={agent.status} /></span>
-                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span>{projectDisplayName(agent.project) ? `${projectDisplayName(agent.project)} (local)` : "No project"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
+                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span title={agent.cwd ?? agent.workspaceCandidate?.name}>{workspaceLabel(agent) ?? "No workspace"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
                 </button>
               </li>
             ))}
@@ -838,10 +839,12 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
               </header>
               <dl className="agent-facts">
                 <div><dt>Provider</dt><dd>{model.detail.provider}</dd></div>
-                <div><dt>Project</dt><dd>{model.detail.project ? `${model.detail.project.name} (local)` : "Not reported"}</dd></div>
+                <div><dt>Workspace</dt><dd title={model.detail.cwd ?? model.detail.workspaceCandidate?.name}>{workspaceLabel(model.detail) ?? "No workspace"}</dd></div>
                 <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
                 <div className="wide"><dt>Working directory</dt><dd className="mono">{model.detail.cwd ?? "Not reported"}</dd></div>
               </dl>
+              {model.detail.status === "unknown" && <p className="hint workspace-hint">{statusExplanation("unknown")}</p>}
+              {!model.detail.cwd && model.detail.workspaceCandidate && <p className="hint workspace-hint">Workspace is a host candidate, not a verified path.</p>}
               {model.detail.pendingApprovals.map((approval) => (
                 <section className="waiting-card" key={approval.id} aria-labelledby={`waiting-${approval.id}`}>
                   <div className="approval-title"><ShieldAlert aria-hidden="true" /><h3 id={`waiting-${approval.id}`}>Waiting for approval</h3></div>

@@ -11,7 +11,7 @@ import { AgentHostError } from "../src/errors.js";
 import type { AgentDetail } from "../src/domain.js";
 import type { DashboardNotificationPermission, NotificationCoordinator, NotificationGateway } from "../src/daily/notifications.js";
 import { defaultPreferences, type DashboardPreferences } from "../src/daily/preferences.js";
-import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
+import { createDemoSnapshot, createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
 import { SourceControlError } from "../src/repositories/source-control.js";
@@ -435,6 +435,20 @@ describe("evaluation dashboard", () => {
     await user.selectOptions(screen.getByLabelText("Status"), "unknown");
     await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0006/ }))[0]!);
     expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument();
+  });
+
+  it("labels worktrees and detections so operators can tell agents apart", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const user = userEvent.setup();
+    render(<App client={client} />);
+
+    expect(await screen.findByText("orbit · 60a8")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Status"), "unknown");
+    expect(screen.getByText("example-labs-orbit")).toBeInTheDocument();
+    expect(screen.getAllByText("Detected").length).toBeGreaterThan(0);
   });
 
   it("preserves filter, selection, and per-agent draft across live updates", async () => {

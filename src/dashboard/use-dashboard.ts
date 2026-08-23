@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentHostClient } from "../client.js";
 import type { ConnectionState } from "../connection.js";
-import type {
-  AdapterHealth,
-  AgentAction,
-  AgentActionResult,
-  AgentDetail,
-  AgentEvent,
-  AgentPageRequest,
-  AgentSnapshot,
-  AgentSort,
-  AgentStatus,
-  AgentSummary,
-  ApiInfo,
+import {
+  workspaceLabel,
+  type AdapterHealth,
+  type AgentAction,
+  type AgentActionResult,
+  type AgentDetail,
+  type AgentEvent,
+  type AgentPageRequest,
+  type AgentSnapshot,
+  type AgentSort,
+  type AgentStatus,
+  type AgentSummary,
+  type ApiInfo,
 } from "../domain.js";
 import { toAgentHostError } from "../errors.js";
 import { appendBoundedEvent, applyVisibleEvent, reconcileVisibleEvents, replayableEvents, type BoundedEventBuffer } from "./use-cases.js";
@@ -87,7 +88,7 @@ function matchesQuery(agent: AgentSummary, query: DashboardQuery): boolean {
   return (
     (query.status === "all" || agent.status === query.status) &&
     (!query.provider || agent.provider === query.provider) &&
-    (!text || [agent.name, agent.provider, agent.cwd, agent.project?.name].some((value) => value?.toLocaleLowerCase().includes(text)))
+    (!text || [agent.name, agent.provider, agent.cwd, agent.project?.name, agent.workspaceCandidate?.name, workspaceLabel(agent)].some((value) => value?.toLocaleLowerCase().includes(text)))
   );
 }
 

@@ -21,6 +21,12 @@ export interface AgentProject {
   readonly scope: "local";
 }
 
+export interface WorkspaceCandidate {
+  readonly id: string;
+  readonly name: string;
+  readonly confidence: "low" | "medium" | "high";
+}
+
 export interface AgentSummary {
   readonly id: string;
   readonly name: string;
@@ -30,6 +36,7 @@ export interface AgentSummary {
   readonly cwd?: string;
   readonly lastActivityAt?: string;
   readonly project?: AgentProject;
+  readonly workspaceCandidate?: WorkspaceCandidate;
   readonly provenance: AgentProvenance;
 }
 
@@ -152,6 +159,148 @@ export function canDecideApproval(approval: ApprovalRequest): boolean {
 
 export function projectDisplayName(project: AgentProject | undefined): string | undefined {
   return project?.name;
+}
+
+export function statusLabel(status: AgentStatus): string {
+  return status === "unknown" ? "Detected" : status;
+}
+
+export function statusExplanation(status: AgentStatus): string | undefined {
+  return status === "unknown"
+    ? "The host found this agent but cannot report whether it is idle, working, or blocked."
+    : undefined;
+}
+
+export interface AgentObservation {
+  readonly kind: "process" | "leftover" | "history" | "session";
+  readonly kindLabel: string;
+  readonly summary: string;
+}
+
+export function agentObservation(agent: AgentSummary): AgentObservation {
+  const workspace = workspaceLabel(agent);
+  const source = agent.provenance.source;
+  const task = usefulTaskName(agent.name);
+
+  if (source === "process") {
+    return {
+      kind: "process",
+      kindLabel: "Process",
+      summary: workspace
+        ? `A ${agent.provider} process is running in ${workspace}. The host cannot say what it is doing.`
+        : `A ${agent.provider} process is running without a project workspace. This is usually a helper, not a coding session.`,
+    };
+  }
+
+  if (source === "cursor-desktop" || source === "cursor-artifacts") {
+    return {
+      kind: "history",
+      kindLabel: "History",
+      summary: workspace
+        ? `Cursor conversation${task ? ` “${task}”` : ""} in ${workspace}. This is local history, not a live control session.`
+        : `Cursor conversation${task ? ` “${task}”` : ""}. This is local history, not a live control session.`,
+    };
+  }
+
+  if (agent.status === "unknown") {
+    return {
+      kind: "leftover",
+      kindLabel: "Leftover",
+      summary: workspace
+        ? `${task ? `“${task}”` : "This session"} in ${workspace} was seen recently, but the host cannot confirm it is still working.`
+        : `${task ? `“${task}”` : "This session"} was seen recently, but the host cannot confirm it is still working.`,
+    };
+  }
+
+  const state = agent.status === "blocked"
+    ? "waiting for approval"
+    : agent.status === "working"
+      ? "working"
+      : agent.status === "done"
+        ? "finished"
+        : agent.status === "error"
+          ? "errored"
+          : "idle";
+  return {
+    kind: "session",
+    kindLabel: "Session",
+    summary: workspace
+      ? `${task ? `“${task}”` : "This session"} is ${state} in ${workspace}.`
+      : `${task ? `“${task}”` : "This session"} is ${state}.`,
+  };
+}
+
+function usefulTaskName(name: string): string | undefined {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === "undefined" || / · (undefined|\d+)$/u.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+export function workspaceLabel(input: {
+  readonly cwd?: string;
+  readonly project?: AgentProject;
+  readonly workspaceCandidate?: WorkspaceCandidate;
+}): string | undefined {
+  return labelFromCwd(input.cwd) ?? usableProjectName(input.project?.name) ?? labelFromCandidateName(input.workspaceCandidate?.name);
+}
+
+function usableProjectName(name: string | undefined): string | undefined {
+  const trimmed = name?.trim();
+  return trimmed && !isWeakBasename(trimmed) ? trimmed : undefined;
+}
+
+function labelFromCwd(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  const portable = cwd.replaceAll("\\", "/").replace(/\/+$/u, "");
+  const segments = portable.split("/").filter((segment) => segment && segment !== ".");
+  if (segments.length === 0) return undefined;
+
+  const worktreesAt = lastIndexOf(segments, "worktrees");
+  if (worktreesAt >= 0 && worktreesAt + 1 < segments.length) {
+    const parent = segments[worktreesAt - 1];
+    const first = segments[worktreesAt + 1]!;
+    const rest = segments.slice(worktreesAt + 2);
+    if (parent === ".codex") {
+      const repo = rest[rest.length - 1] ?? first;
+      return rest.length ? `${repo} · ${first}` : first;
+    }
+    if (parent === ".cursor") {
+      const id = rest[0];
+      return id ? `${first} · ${id.slice(0, 8)}` : first;
+    }
+    const repo = rest[rest.length - 1] ?? first;
+    return rest.length ? `${repo} · ${first}` : first;
+  }
+
+  const githubAt = segments.indexOf("github.com");
+  if (githubAt >= 0 && githubAt + 2 < segments.length) {
+    return `${segments[githubAt + 1]}/${segments[githubAt + 2]}`;
+  }
+
+  const last = segments[segments.length - 1]!;
+  if (isWeakBasename(last) && segments.length >= 2) return segments.slice(-2).join("/");
+  return last;
+}
+
+function labelFromCandidateName(name: string | undefined): string | undefined {
+  const trimmed = name?.trim();
+  if (!trimmed || isWeakBasename(trimmed)) return undefined;
+  const worktree = /(?:^|-)worktrees-([A-Za-z0-9]{4,12})-(.+)$/u.exec(trimmed);
+  if (worktree) return `${worktree[2]} · ${worktree[1]}`;
+  const github = /(?:^|-)github-com-(.+)$/u.exec(trimmed);
+  if (github?.[1]) return github[1];
+  return trimmed;
+}
+
+function isWeakBasename(value: string): boolean {
+  return value === "/" || value === "." || value === "undefined" || /^\d+\.\d+/u.test(value);
+}
+
+function lastIndexOf(values: readonly string[], target: string): number {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    if (values[index] === target) return index;
+  }
+  return -1;
 }
 
 export function localProjectIdPattern(): RegExp {
