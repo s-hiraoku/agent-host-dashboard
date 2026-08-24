@@ -26,6 +26,8 @@ test("onboards without persisting credentials and restores safe preferences", as
   await expect(page.locator(".app-shell")).toHaveClass(/density-compact/);
   await page.getByLabel("Status").selectOption("blocked");
   await expect(page.getByText(/shown of 167/)).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Saved views" })).toBeVisible();
   await page.getByRole("button", { name: "Save view" }).click();
 
   await page.reload();
@@ -35,6 +37,7 @@ test("onboards without persisting credentials and restores safe preferences", as
   await connect(page);
   await expect(page.locator(".app-shell")).toHaveClass(/density-compact/);
   await expect(page.getByLabel("Status")).toHaveValue("blocked");
+  await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Saved view").locator("option")).toHaveCount(2);
 });
 

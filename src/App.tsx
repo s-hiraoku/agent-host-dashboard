@@ -25,6 +25,7 @@ import {
   Settings,
   Send,
   Server,
+  ScanSearch,
   ShieldAlert,
   Stethoscope,
   TerminalSquare,
@@ -35,12 +36,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { AgentHostClient } from "./client.js";
 import type { ConnectionState } from "./connection.js";
-import { agentActions, canDecideApproval, projectDisplayName, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
+import { canDecideApproval, statusExplanation, statusLabel, workspaceLabel, type AgentAction, type AgentDetail, type AgentStatus, type ApprovalRequest } from "./domain.js";
 import { useDashboard, type DashboardActionRecord, type DashboardQuery } from "./dashboard/use-dashboard.js";
 import { requiresRepositoryAuthentication, useRepositoryOverview } from "./dashboard/use-repository-overview.js";
 import { formatActivity, providerMetrics, statusMetrics } from "./dashboard/use-cases.js";
 import { notificationFromEvent, shouldNotify, type DashboardNotificationPermission, type NotificationCoordinator, type NotificationGateway } from "./daily/notifications.js";
-import { agentColumns, densities, type DashboardPreferences } from "./daily/preferences.js";
+import { agentColumns, densities, type DashboardPreferences, type SavedView } from "./daily/preferences.js";
 import type { RepositoryContextSource } from "./repositories/context-source.js";
 import type { PullRequestRelationship } from "./repositories/domain.js";
 import type { SourceControlClient } from "./repositories/source-control.js";
@@ -64,10 +65,11 @@ const statusIcons: Record<AgentStatus, ReactNode> = {
 };
 
 function StatusBadge({ status }: { readonly status: AgentStatus }) {
+  const explanation = statusExplanation(status);
   return (
-    <span className={`status-badge status-${status}`}>
+    <span className={`status-badge status-${status}`} title={explanation}>
       {statusIcons[status]}
-      <span>{status}</span>
+      <span>{statusLabel(status)}</span>
     </span>
   );
 }
@@ -221,7 +223,7 @@ function RepositoryPanel({
   return (
     <section className="repository-panel" aria-labelledby="repository-heading" aria-busy={state.status === "loading"}>
       <div className="section-heading">
-        <div><p className="eyebrow">Code context</p><h3 id="repository-heading">Repositories · Issues · PRs</h3></div>
+        <div><p className="panel-label">Repository</p><h3 id="repository-heading">Linked code</h3></div>
         <GitFork aria-hidden="true" />
       </div>
       {!contextSource && <div className="repository-state"><strong>Repository context not exposed</strong><p>This host has not published a versioned agent-to-repository association.</p></div>}
@@ -275,24 +277,37 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
       });
   };
 
-  if (!detail) return <aside className="action-panel panel"><div className="empty-state">Select an agent to inspect available actions.</div></aside>;
+  if (!detail) {
+    return (
+      <aside className="action-panel panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">Actions</p>
+            <h2 id="actions-heading">Operate</h2>
+          </div>
+        </div>
+        <p className="panel-purpose">Approve, send a prompt, or stop the selected agent.</p>
+        <div className="empty-state">Select an agent to operate on it.</div>
+      </aside>
+    );
+  }
+
+  const canOperate = detail.pendingApprovals.length > 0 || detail.capabilities.prompt || detail.capabilities.read || detail.capabilities.interrupt || detail.capabilities.focus;
 
   return (
     <aside className="action-panel panel" aria-labelledby="actions-heading" aria-busy={busy}>
       <div className="panel-heading">
-        <div><p className="eyebrow">Selected target</p><h2 id="actions-heading">Actions</h2></div>
-        <StatusBadge status={detail.status} />
-      </div>
-      <div className="target-context">
-        <strong>{detail.name}</strong>
-        <span className="mono muted">{detail.id}</span>
-        <span className="mono">{detail.cwd ?? "cwd not reported"}</span>
+        <div>
+          <p className="panel-label">Actions</p>
+          <h2 id="actions-heading">Operate</h2>
+          <p className="panel-purpose">Use these controls after reviewing the details in the center.</p>
+        </div>
       </div>
 
       {detail.pendingApprovals.map((approval) => (
-        <section className="approval-card" key={approval.id} aria-labelledby={`approval-${approval.id}`}>
-          <div className="approval-title"><ShieldAlert aria-hidden="true" /><h3 id={`approval-${approval.id}`}>Pending approval</h3></div>
-          <ApprovalContext approval={approval} />
+        <section className="action-group" key={approval.id} aria-labelledby={`approval-${approval.id}`}>
+          <h3 id={`approval-${approval.id}`}>Approve or reject</h3>
+          <p className="hint">{approval.summary}</p>
           {!canDecideApproval(approval) && <p className="keyboard-warning" role="status">{approval.actionable === false ? "Approve and reject are disabled because this request is not actionable." : approval.truncated ? "Approve and reject are disabled because the file list is truncated." : "Approve and reject are disabled because the host did not expose command or file context for this request."}</p>}
           <div className="approval-actions">
             {canDecideApproval(approval) && detail.capabilities.reject && (
@@ -320,7 +335,8 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
       ))}
 
       {detail.capabilities.prompt && (
-        <section className="action-section">
+        <section className="action-group">
+          <h3>Send a prompt</h3>
           <label htmlFor="prompt-draft">Prompt</label>
           <p className="hint" id="prompt-hint">Draft stays with this agent during live updates and reconnects.</p>
           <textarea
@@ -329,7 +345,7 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
             value={draft}
             onChange={(event) => setDrafts((current) => ({ ...current, [detail.id]: event.target.value }))}
             placeholder="Describe the next task…"
-            rows={5}
+            rows={4}
           />
           <button type="button" className="primary-button" disabled={busy || !draft.trim()} onClick={() => setPending({
             title: "Send this prompt?",
@@ -342,18 +358,25 @@ function ActionPanel({ detail, perform }: { readonly detail: AgentDetail | undef
         </section>
       )}
 
-      <div className="safe-actions">
-        {detail.capabilities.read && <button type="button" className="secondary-button" disabled={busy} onClick={() => void execute(detail, { kind: "read" })}><TerminalSquare />Read output</button>}
-        {detail.capabilities.interrupt && <button type="button" className="danger-button" disabled={busy} onClick={() => setPending({
-          title: "Interrupt the selected agent?",
-          label: "Interrupt agent",
-          tone: "danger",
-          target: detail,
-          action: { kind: "interrupt" },
-          body: <p>This asks the host to stop the active operation for this exact agent.</p>,
-        })}><Ban />Interrupt</button>}
-      </div>
+      {(detail.capabilities.read || detail.capabilities.interrupt || detail.capabilities.focus) && (
+        <section className="action-group">
+          <h3>Other controls</h3>
+          <div className="safe-actions">
+            {detail.capabilities.focus && <button type="button" className="secondary-button" disabled={busy} onClick={() => void execute(detail, { kind: "focus" })}><ScanSearch />Focus</button>}
+            {detail.capabilities.read && <button type="button" className="secondary-button" disabled={busy} onClick={() => void execute(detail, { kind: "read" })}><TerminalSquare />Read output</button>}
+            {detail.capabilities.interrupt && <button type="button" className="danger-button" disabled={busy} onClick={() => setPending({
+              title: "Interrupt the selected agent?",
+              label: "Interrupt agent",
+              tone: "danger",
+              target: detail,
+              action: { kind: "interrupt" },
+              body: <p>This asks the host to stop the active operation for this exact agent.</p>,
+            })}><Ban />Interrupt</button>}
+          </div>
+        </section>
+      )}
 
+      {!canOperate && <div className="empty-state">This agent has no available actions.</div>}
       <p className="action-message" aria-live="polite">{message ?? ""}</p>
       <ConfirmDialog pending={pending} busy={busy} onCancel={() => setPending(undefined)} onConfirm={(confirmation) => execute(confirmation.target, confirmation.action)} />
     </aside>
@@ -383,7 +406,14 @@ export interface DailyDriverControls {
   };
 }
 
-function SettingsSurface({ controls, onWorkspace, notificationPermission, notificationError, onRequestNotifications, providers, projects, mutedProviders, mutedProjects, onToggleProvider, onToggleProject }: {
+function sortLabel(sort: DashboardQuery["sort"]): string {
+  if (sort.field === "status") return "Attention first";
+  if (sort.field === "lastActivityAt") return "Last activity";
+  if (sort.field === "name") return "Name A–Z";
+  return "Provider";
+}
+
+function SettingsSurface({ controls, onWorkspace, notificationPermission, notificationError, onRequestNotifications, providers, projects, mutedProviders, mutedProjects, onToggleProvider, onToggleProject, currentQuery, savedViewMessage, onSaveView, onApplyView }: {
   readonly controls: DailyDriverControls;
   readonly onWorkspace: () => void;
   readonly notificationPermission: DashboardNotificationPermission;
@@ -395,6 +425,10 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
   readonly mutedProjects: ReadonlySet<string>;
   readonly onToggleProvider: (provider: string) => void;
   readonly onToggleProject: (projectId: string) => void;
+  readonly currentQuery: DashboardQuery;
+  readonly savedViewMessage: string | undefined;
+  readonly onSaveView: () => void;
+  readonly onApplyView: (view: SavedView) => void;
 }) {
   const update = (patch: Partial<DashboardPreferences>) => controls.onPreferencesChange((current) => ({ ...current, ...patch }));
   const updateNotifications = (patch: Partial<DashboardPreferences["notifications"]>) => controls.onPreferencesChange((current) => ({ ...current, notifications: { ...current.notifications, ...patch } }));
@@ -414,6 +448,16 @@ function SettingsSurface({ controls, onWorkspace, notificationPermission, notifi
         <div><p className="eyebrow">Appearance</p><h2 id="appearance-heading">Density and agent columns</h2></div>
         <label htmlFor="density-setting"><span>Density</span><select id="density-setting" value={controls.preferences.density} onChange={(event) => update({ density: event.target.value as DashboardPreferences["density"] })}>{densities.map((density) => <option key={density} value={density}>{density}</option>)}</select></label>
         <fieldset><legend>Visible agent columns</legend>{agentColumns.map((column) => <label key={column}><input type="checkbox" checked={controls.preferences.columns.includes(column)} onChange={(event) => controls.onPreferencesChange((current) => ({ ...current, columns: event.target.checked ? [...current.columns, column] : current.columns.filter((item) => item !== column) }))} />{column}</label>)}</fieldset>
+        <div>
+          <h3 id="saved-views-heading">Saved views</h3>
+          <p>Save the current dashboard status, provider, and sort. Applying a view restores those filters.</p>
+        </div>
+        <p className="hint">Current: {currentQuery.status === "all" ? "all statuses" : statusLabel(currentQuery.status)} · {currentQuery.provider || "all providers"} · {sortLabel(currentQuery.sort)}</p>
+        <div className="saved-view-row">
+          <label htmlFor="saved-view"><span>Saved view</span><select id="saved-view" defaultValue="" onChange={(event) => { const view = controls.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) onApplyView(view); }}><option value="">Select a view</option>{controls.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
+          <button type="button" onClick={onSaveView}>Save view</button>
+        </div>
+        <p className="action-message" aria-live="polite">{savedViewMessage ?? ""}</p>
       </section>
       <section className="settings-card" aria-labelledby="notification-heading">
         <div><p className="eyebrow">Attention notifications</p><h2 id="notification-heading">Blocked, completed, and error events</h2><p>Only new semantic events can notify. Initial snapshots and resyncs stay silent.</p></div>
@@ -676,7 +720,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       ...current,
       savedViews: [...current.savedViews, {
         id: `view-${Date.now()}-${sequence}`,
-        name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : model.query.status}`,
+        name: `View ${sequence} · ${model.query.status === "all" ? "all statuses" : statusLabel(model.query.status)}`,
         status: model.query.status,
         provider: model.query.provider,
         sort: model.query.sort,
@@ -711,7 +755,7 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
       </header>
       {dailyDriver?.environmentNotice && <div className="environment-notice" role="status"><ShieldAlert aria-hidden="true" />{dailyDriver.environmentNotice}</div>}
 
-      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} notificationError={notificationError} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={toggleProvider} onToggleProject={toggleProject} />}
+      {surface === "settings" && dailyDriver && <SettingsSurface controls={dailyDriver} onWorkspace={goWorkspace} notificationPermission={notificationPermission} notificationError={notificationError} onRequestNotifications={requestNotifications} providers={notificationProviders} projects={notificationProjects} mutedProviders={mutedProviders} mutedProjects={mutedProjects} onToggleProvider={toggleProvider} onToggleProject={toggleProject} currentQuery={model.query} savedViewMessage={savedViewMessage} onSaveView={saveCurrentView} onApplyView={(view) => { model.setQuery({ text: "", status: view.status, provider: view.provider, sort: view.sort }); goWorkspace(); }} />}
       {surface === "activity" && dailyDriver && <ActivitySurface recentAgents={recentAgents} actionHistory={model.actionHistory} onWorkspace={goWorkspace} onSelect={(agentId) => { model.select(agentId); goWorkspace(); }} onClear={() => { setRecentAgents([]); model.clearActionHistory(); }} />}
       {surface === "diagnostics" && dailyDriver && <DiagnosticsSurface model={model} onWorkspace={goWorkspace} />}
       {surface === "privacy" && dailyDriver && <PrivacySurface onWorkspace={goWorkspace} onClear={dailyDriver.onClearPreferences} />}
@@ -719,29 +763,41 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
         <section className="summary-strip" aria-labelledby="summary-heading">
         <div className="total-metric"><p className="eyebrow" id="summary-heading">Current scope</p><strong>{model.snapshot?.total?.toLocaleString() ?? "—"}</strong><span>agents</span></div>
         {metrics.map((metric) => (
-          <button key={metric.status} type="button" className={`summary-metric ${metric.urgent ? "urgent" : ""}`} onClick={() => model.setQuery(updateQuery(model.query, { status: metric.status }))}>
+          <button
+            key={metric.status}
+            type="button"
+            className={`summary-metric ${metric.urgent ? "urgent" : ""} ${model.query.status === metric.status ? "selected" : ""}`}
+            aria-pressed={model.query.status === metric.status}
+            onClick={() => model.setQuery(updateQuery(model.query, { status: metric.status }))}
+          >
             <StatusBadge status={metric.status} /><strong>{metric.count?.toLocaleString() ?? "—"}</strong>
           </button>
         ))}
-        <div className="adapter-summary"><HeartPulse aria-hidden="true" /><div><strong>{model.health.filter((item) => item.status === "healthy").length}/{model.health.length}</strong><span>adapters healthy</span></div></div>
+        <div className="adapter-summary" role="region" aria-labelledby="health-heading">
+          <HeartPulse aria-hidden="true" />
+          <div>
+            <p id="health-heading" className="panel-label">Adapter health</p>
+            <strong>{model.health.filter((item) => item.status === "healthy").length}/{model.health.length}</strong>
+            <span>adapters healthy{model.health.some((item) => item.status !== "healthy") ? ` · ${model.health.filter((item) => item.status !== "healthy").map((item) => `${item.label}: ${item.status}`).join(", ")}` : ""}</span>
+          </div>
+        </div>
       </section>
 
       <main ref={workspaceRef} id={surface === "workspace" ? "main-content" : undefined} tabIndex={-1} className="workspace">
         <section className="agent-rail panel" aria-labelledby="agents-heading">
-          <div className="rail-heading"><div><p className="eyebrow">Attention queue</p><h1 id="agents-heading">Agents</h1></div><button type="button" className="icon-button" onClick={() => void model.refresh()} aria-label="Refresh agents"><RefreshCw /></button></div>
+          <div className="rail-heading">
+            <div>
+              <p className="panel-label">List</p>
+              <h1 id="agents-heading">Agents</h1>
+              <p className="panel-purpose">Select an agent to inspect.</p>
+            </div>
+            <button type="button" className="icon-button" onClick={() => void model.refresh()} aria-label="Refresh agents"><RefreshCw /></button>
+          </div>
           <div className="filters">
-            {dailyDriver && <><div className="saved-view-row"><label><span>Saved view</span><select defaultValue="" onChange={(event) => { const view = dailyDriver.preferences.savedViews.find((candidate) => candidate.id === event.target.value); if (view) model.setQuery({ text: "", status: view.status, provider: view.provider, sort: view.sort }); }}><option value="">Current filters</option>{dailyDriver.preferences.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><button type="button" onClick={saveCurrentView}>Save view</button></div><p className="action-message" aria-live="polite">{savedViewMessage ?? ""}</p></>}
             <label className="search-field"><span className="visually-hidden">Search agents</span><Search aria-hidden="true" /><input ref={searchRef} aria-keyshortcuts="/" value={model.query.text} onChange={(event) => model.setQuery(updateQuery(model.query, { text: event.target.value }))} placeholder="Search agents" /></label>
             <div className="filter-row">
-              <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{metric.status}</option>)}</select></label>
+              <label><span>Status</span><select value={model.query.status} onChange={(event) => model.setQuery(updateQuery(model.query, { status: event.target.value as AgentStatus | "all" }))}><option value="all">All</option>{metrics.map((metric) => <option key={metric.status} value={metric.status}>{statusLabel(metric.status)}</option>)}</select></label>
               <label><span>Provider</span><select value={model.query.provider} onChange={(event) => model.setQuery(updateQuery(model.query, { provider: event.target.value }))}><option value="">All</option>{providers.map(([provider]) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
-            </div>
-            <div className="provider-breakdown" aria-label={globalFacetsUnavailable ? "Observed providers; global counts unavailable" : "Provider summary"}>
-              {providers.slice(0, 4).map(([provider, count]) => (
-                <button key={provider} type="button" aria-pressed={model.query.provider === provider} onClick={() => model.setQuery(updateQuery(model.query, { provider: model.query.provider === provider ? "" : provider }))}>
-                  <span>{provider}</span><strong>{count ?? "—"}</strong>
-                </button>
-              ))}
             </div>
             <label className="sort-control"><span>Sort</span><select disabled={sortUnavailable} title={sortUnavailable ? "This host exposes fixed attention ordering." : undefined} value={`${model.query.sort.field}:${model.query.sort.direction}`} onChange={(event) => {
               const [field, direction] = event.target.value.split(":") as [DashboardQuery["sort"]["field"], DashboardQuery["sort"]["direction"]];
@@ -754,9 +810,9 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
           <ul className="agent-list">
             {model.snapshot?.agents.map((agent) => (
               <li key={agent.id}>
-                <button type="button" className={`agent-row ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => { rememberAgent(agent); model.select(agent.id); }} aria-current={agent.id === model.selectedId ? "true" : undefined}>
+                <button type="button" className={`agent-row status-${agent.status} ${agent.id === model.selectedId ? "selected" : ""}`} onClick={() => { rememberAgent(agent); model.select(agent.id); }} aria-current={agent.id === model.selectedId ? "true" : undefined}>
                   <span className="agent-row-top"><strong>{agent.name}</strong><StatusBadge status={agent.status} /></span>
-                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span>{projectDisplayName(agent.project) ? `${projectDisplayName(agent.project)} (local)` : "No project"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
+                  <span className="agent-row-meta">{(!dailyDriver || dailyDriver.preferences.columns.includes("provider")) && <span>{agent.provider}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("project")) && <span title={agent.cwd ?? agent.workspaceCandidate?.name}>{workspaceLabel(agent) ?? "No workspace"}</span>}{(!dailyDriver || dailyDriver.preferences.columns.includes("activity")) && <span>{formatActivity(agent.lastActivityAt, currentTime)}</span>}</span>
                 </button>
               </li>
             ))}
@@ -773,33 +829,52 @@ export function App({ client, now = Date.now, dailyDriver, showDemoControls = tr
           {model.detail ? (
             <>
               <header className="agent-header">
-                <div><p className="eyebrow">Observed agent</p><h2 id="agent-heading">{model.detail.name}</h2><span className="mono muted">{model.detail.id}</span></div>
+                <div>
+                  <p className="panel-label">Details</p>
+                  <h2 id="agent-heading">{model.detail.name}</h2>
+                  <p className="panel-purpose">What this agent is doing, waiting on, and linked to.</p>
+                  <span className="mono muted">{model.detail.id}</span>
+                </div>
                 <StatusBadge status={model.detail.status} />
               </header>
               <dl className="agent-facts">
                 <div><dt>Provider</dt><dd>{model.detail.provider}</dd></div>
-                <div><dt>Project</dt><dd>{model.detail.project ? `${model.detail.project.name} (local)` : "Not reported"}</dd></div>
-                <div><dt>Source</dt><dd>{model.detail.provenance.source} · {model.detail.provenance.confidence ?? "unknown"}</dd></div>
-                <div className="wide"><dt>Working directory</dt><dd className="mono">{model.detail.cwd ?? "Not reported"}</dd></div>
+                <div><dt>Workspace</dt><dd title={model.detail.cwd ?? model.detail.workspaceCandidate?.name}>{workspaceLabel(model.detail) ?? "No workspace"}</dd></div>
                 <div><dt>Last activity</dt><dd>{formatActivity(model.detail.lastActivityAt, currentTime)}</dd></div>
+                <div className="wide"><dt>Working directory</dt><dd className="mono">{model.detail.cwd ?? "Not reported"}</dd></div>
               </dl>
-              <div className="capability-row"><span className="field-label">Public capabilities</span><div>{agentActions.filter((action) => model.detail?.capabilities[action]).map((action) => <span className="capability" key={action}>{action}</span>)}</div></div>
+              {model.detail.status === "unknown" && <p className="hint workspace-hint">{statusExplanation("unknown")}</p>}
+              {!model.detail.cwd && model.detail.workspaceCandidate && <p className="hint workspace-hint">Workspace is a host candidate, not a verified path.</p>}
+              {model.detail.pendingApprovals.map((approval) => (
+                <section className="waiting-card" key={approval.id} aria-labelledby={`waiting-${approval.id}`}>
+                  <div className="approval-title"><ShieldAlert aria-hidden="true" /><h3 id={`waiting-${approval.id}`}>Waiting for approval</h3></div>
+                  <ApprovalContext approval={approval} />
+                  <p className="hint">Use the Actions panel on the right to approve or reject.</p>
+                </section>
+              ))}
               {model.selectedId && <RepositoryPanel agentId={model.selectedId} contextSource={repositoryContext} sourceControl={sourceControl} epoch={model.repositoryEpoch} {...(dailyDriver?.sourceControlSession?.onAuthenticationFailure ? { onAuthenticationFailure: dailyDriver.sourceControlSession.onAuthenticationFailure } : {})} />}
               <section className="timeline" aria-labelledby="timeline-heading">
-                <div className="section-heading"><div><p className="eyebrow">Semantic stream</p><h3 id="timeline-heading">Live events</h3></div><span className="live-indicator"><Activity aria-hidden="true" />Live</span></div>
+                <div className="section-heading"><div><p className="panel-label">Activity</p><h3 id="timeline-heading">Recent events</h3></div><span className="live-indicator"><Activity aria-hidden="true" />Live</span></div>
                 <ol>
                   {model.events.length ? model.events.map((event, index) => (
-                    <li key={`${event.revision}-${index}`}><span className="event-revision mono">r{event.revision}</span><span className="event-icon"><Code2 aria-hidden="true" /></span><div><strong>{event.type}</strong><p>{event.type === "agent.upserted" ? event.agent.name : event.type === "adapter.health" ? event.adapter.label : "Semantic host event"}</p></div></li>
-                  )) : <li className="empty-event"><Activity aria-hidden="true" /><span>Waiting for semantic events. Selection and scroll remain stable.</span></li>}
+                    <li key={`${event.revision}-${index}`}><span className="event-revision mono">r{event.revision}</span><span className="event-icon"><Code2 aria-hidden="true" /></span><div><strong>{event.type}</strong><p>{event.type === "agent.upserted" ? event.agent.name : event.type === "adapter.health" ? event.adapter.label : "Host event"}</p></div></li>
+                  )) : <li className="empty-event"><Activity aria-hidden="true" /><span>Waiting for events. Selection and scroll remain stable.</span></li>}
                 </ol>
-              </section>
-              <section className="adapter-health" aria-labelledby="health-heading">
-                <div className="section-heading"><div><p className="eyebrow">Discovery plane</p><h3 id="health-heading">Adapter health</h3></div></div>
-                <ul>{model.health.map((adapter) => <li key={adapter.id}><span className={`health-dot health-${adapter.status}`} aria-hidden="true" /><div><strong>{adapter.label}</strong><span>{adapter.status}</span></div><span className="mono">{adapter.durationMs ?? "—"} ms</span>{adapter.error && <span className="health-error">{adapter.error.message}</span>}</li>)}</ul>
               </section>
               <details className="developer-panel"><summary><Code2 aria-hidden="true" /><span>Developer panel</span><small>public API JSON</small></summary><pre>{rawPublicJson}</pre></details>
             </>
-          ) : <div className="empty-state">Select an agent to inspect its public details.</div>}
+          ) : (
+            <>
+              <header className="agent-header">
+                <div>
+                  <p className="panel-label">Details</p>
+                  <h2 id="agent-heading">No agent selected</h2>
+                  <p className="panel-purpose">What this agent is doing, waiting on, and linked to.</p>
+                </div>
+              </header>
+              <div className="empty-state">Select an agent from the list to see its status and repository.</div>
+            </>
+          )}
         </section>
 
         <ActionPanel detail={model.detail} perform={model.perform} />

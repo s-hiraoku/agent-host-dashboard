@@ -137,7 +137,11 @@ const productionConnector: ClientConnector = {
   async open(input, signal) {
     assertOpenSession(signal);
     const channel = new FetchHttpChannel({
-      baseUrl: input.baseUrl,
+      // Dev Vite pages must not fetch :4777 directly (cross-port / embedded browsers).
+      // Use an absolute same-origin proxy URL so <base href> cannot rewrite the path.
+      baseUrl: import.meta.env.DEV
+        ? new URL("/agent-host", window.location.origin).toString().replace(/\/$/, "")
+        : input.baseUrl,
       authentication: () => {
         const token = input.credential();
         return token ? { scheme: "Bearer", token } : undefined;

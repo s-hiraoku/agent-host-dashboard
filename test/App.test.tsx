@@ -11,7 +11,7 @@ import { AgentHostError } from "../src/errors.js";
 import type { AgentDetail } from "../src/domain.js";
 import type { DashboardNotificationPermission, NotificationCoordinator, NotificationGateway } from "../src/daily/notifications.js";
 import { defaultPreferences, type DashboardPreferences } from "../src/daily/preferences.js";
-import { createLargeDemoSnapshot } from "../src/testing/fixtures.js";
+import { createDemoSnapshot, createLargeDemoSnapshot } from "../src/testing/fixtures.js";
 import { MockAgentHostTransport } from "../src/testing/mock-transport.js";
 import { MockRepositoryContextSource, MockSourceControlClient } from "../src/testing/repositories/mock-clients.js";
 import { SourceControlError } from "../src/repositories/source-control.js";
@@ -260,7 +260,7 @@ describe("evaluation dashboard", () => {
     await user.click(next);
 
     expect(screen.queryByRole("link", { name: /example-labs\/orbit/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Select an agent to inspect its public details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an agent from the list to see its status and repository.")).toBeInTheDocument();
   });
 
   it("does not present page-local sort or facet approximations as global capabilities", async () => {
@@ -422,6 +422,33 @@ describe("evaluation dashboard", () => {
     expect(read).toBeDisabled();
     releaseAction();
     await waitFor(() => expect(read).toBeEnabled());
+  });
+
+  it("offers Focus only when the host advertises the capability", async () => {
+    const { transport, user } = renderDashboard();
+    await user.selectOptions(screen.getByLabelText("Status"), "working");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0001/ }))[0]!);
+    const focus = await screen.findByRole("button", { name: "Focus" });
+    await user.click(focus);
+    await waitFor(() => expect(transport.actions[0]?.action).toEqual({ kind: "focus" }));
+
+    await user.selectOptions(screen.getByLabelText("Status"), "unknown");
+    await user.click((await screen.findAllByRole("button", { name: /Sanitized agent 0006/ }))[0]!);
+    expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument();
+  });
+
+  it("labels worktrees and detections so operators can tell agents apart", async () => {
+    const transport = new MockAgentHostTransport();
+    transport.currentSnapshot = createDemoSnapshot();
+    transport.holdEventStreams = true;
+    const client = new DefaultAgentHostClient(transport, { supportedApiVersions: ["1"] });
+    const user = userEvent.setup();
+    render(<App client={client} />);
+
+    expect(await screen.findByText("orbit · 60a8")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Status"), "unknown");
+    expect(screen.getByText("example-labs-orbit")).toBeInTheDocument();
+    expect(screen.getAllByText("Detected").length).toBeGreaterThan(0);
   });
 
   it("preserves filter, selection, and per-agent draft across live updates", async () => {
@@ -599,8 +626,8 @@ describe("evaluation dashboard", () => {
     await screen.findByRole("heading", { name: "Sanitized agent 0002" });
 
     releaseEvents();
-    expect(await screen.findByText("Select an agent to inspect its public details.")).toBeInTheDocument();
-    expect(screen.getByText("Select an agent to inspect available actions.")).toBeInTheDocument();
+    expect(await screen.findByText("Select an agent from the list to see its status and repository.")).toBeInTheDocument();
+    expect(screen.getByText("Select an agent to operate on it.")).toBeInTheDocument();
   });
 
   it("bounds off-page event bursts to one authoritative reload", async () => {
@@ -848,7 +875,7 @@ describe("evaluation dashboard", () => {
       savedViews,
     });
     await screen.findByText("50 shown of 1000");
-
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: "Save view" }));
 
     expect(await screen.findByText(/Saved view limit reached/)).toBeInTheDocument();

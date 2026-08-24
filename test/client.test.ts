@@ -11,6 +11,9 @@ describe("DefaultAgentHostClient", () => {
     await expect(
       client.action({ id: "demo:read-only", capabilities: { read: true } }, { kind: "interrupt" }),
     ).rejects.toMatchObject({ code: "capability_unavailable" });
+    await expect(
+      client.action({ id: "demo:read-only", capabilities: { read: true } }, { kind: "focus" }),
+    ).rejects.toMatchObject({ code: "capability_unavailable" });
     expect(transport.actions).toHaveLength(0);
   });
 
